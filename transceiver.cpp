@@ -1,79 +1,53 @@
 #include "transceiver.h"
 #include "portaudio.h"
-#include "audiofile.h"
-#include <functional>
+#include "wave.h"
 #include <iostream>
 
-constexpr auto CUSTOM_SAMPLE_RATE = 48'000;
-constexpr auto FRAMES_PER_BUFFER = 256;
+// debug
+WAVFile wav_file(2, 48'000, 32);
 
-/* Non-linear amplifier with soft distortion curve. */
-float CubicAmplifier(float input)
+using asio::ip::udp;
+
+static constexpr char MAGIC_NUM_1 = 0xab;
+static constexpr char MAGIC_NUM_2 = 0xcd;
+static constexpr char MONO_CHAN = 1;
+static constexpr char DUAL_CHAN = 2;
+static constexpr size_t HEADER_LEN = 8;
+
+static int io_callback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
+                       const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags, void *userData)
 {
-    // float output, temp;
-    // if (input < 0.0)
-    // {
-    //     temp = input + 1.0f;
-    //     output = (temp * temp * temp) - 1.0f;
-    // }
-    // else
-    // {
-    //     temp = input - 1.0f;
-    //     output = (temp * temp * temp) + 1.0f;
-    // }
-
-    // return output;
-    return input;
-}
-#define FUZZ(x) CubicAmplifier(CubicAmplifier(CubicAmplifier(CubicAmplifier(x))))
-
-static int gNumNoInputs = 0;
-/* This routine will be called by the PortAudio engine when audio is needed.
-** It may be called at interrupt level on some machines so don't do anything
-** that could mess up the system like calling malloc() or free().
-*/
-static int fuzzCallback(const void *inputBuffer, void *outputBuffer,
-                        unsigned long framesPerBuffer,
-                        const PaStreamCallbackTimeInfo *timeInfo,
-                        PaStreamCallbackFlags statusFlags,
-                        void *userData)
-{
-    float *out = (float *)outputBuffer;
-    const float *in = (const float *)inputBuffer;
-    unsigned int i;
-    (void)timeInfo; /* Prevent unused variable warnings. */
-    (void)statusFlags;
-    (void)userData;
-
-    if (inputBuffer == NULL)
-    {
-        for (i = 0; i < framesPerBuffer; i++)
-        {
-            *out++ = 0; /* left - silent */
-            // *out++ = 0; /* right - silent */
-        }
-        gNumNoInputs += 1;
-    }
-    else
-    {
-        for (i = 0; i < framesPerBuffer; i++)
-        {
-            float sample = *in++; /* MONO input */
-            // *out++ = FUZZ(sample); /* left - distorted */
-            *out++ = sample; /* right - clean */
-        }
-    }
-
+    reinterpret_cast<TransCeiver *>(userData)->send_pcm_frames(inputBuffer);
+    reinterpret_cast<TransCeiver *>(userData)->recv_pcm_frames(outputBuffer);
     return paContinue;
 }
 
-static int receiver_callback(const void *inputBuffer, void *, unsigned long framesPerBuffer,
-                             const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags, void *userData)
+static void mix_channels(float *output, float *ssrc, int out_chan, int ssrc_chan, int frames_num)
 {
-    auto &receiver = *(reinterpret_cast<Receiver *>(userData));
-    auto in = reinterpret_cast<const float *>(inputBuffer);
-    receiver.recv_pcm_frames(in);
-    return paContinue;
+    if (out_chan == ssrc_chan)
+    {
+        for (auto i = 0; i < frames_num * ssrc_chan; i++)
+        {
+            *output++ += *ssrc++;
+        }
+    }
+    else if (out_chan == 1 && ssrc_chan == 2)
+    {
+        for (auto i = 0; i < frames_num; i++)
+        {
+            *output++ += *ssrc;
+            ssrc += 2;
+        }
+    }
+    else if (out_chan == 2 && ssrc_chan == 1)
+    {
+        for (auto i = 0; i < frames_num; i++)
+        {
+            *output++ += *ssrc;
+            *output++ += *ssrc;
+            ssrc++;
+        }
+    }
 }
 
 void start_sound_control()
@@ -94,83 +68,160 @@ void close_sound_control()
     }
 }
 
-Receiver::Receiver(int _channels, int sample_rate, int _period)
-    : iss(nullptr), channels(_channels), period(_period), frames(new float[channels * period]), ready(false)
+TransCeiver::TransCeiver(char _token, short _port, int _sample_rate, int _period)
+    : token(_token), ios(nullptr), sample_rate(_sample_rate), period(_period),
+      sock(io_context, udp::endpoint(udp::v4(), _port))
 {
-
     PaStreamParameters input_para;
     input_para.device = Pa_GetDefaultInputDevice();
-    input_para.channelCount = channels;
+    auto input_default_info = Pa_GetDeviceInfo(input_para.device);
+    ichan_num = input_default_info->maxInputChannels > 1 ? 2 : 1;
+    input_para.channelCount = ichan_num;
     input_para.sampleFormat = paFloat32;
-    input_para.suggestedLatency = Pa_GetDeviceInfo(input_para.device)->defaultLowInputLatency;
+    input_para.suggestedLatency = input_default_info->defaultLowInputLatency;
     input_para.hostApiSpecificStreamInfo = nullptr;
 
-    // PaStreamParameters outputParameters;
-    // outputParameters.device = Pa_GetDefaultOutputDevice();
-    // outputParameters.channelCount = 1; /* stereo output */
-    // outputParameters.sampleFormat = paFloat32;
-    // outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowOutputLatency;
-    // outputParameters.hostApiSpecificStreamInfo = NULL;
+    PaStreamParameters output_para;
+    output_para.device = Pa_GetDefaultOutputDevice();
+    auto output_default_info = Pa_GetDeviceInfo(output_para.device);
+    ochan_num = output_default_info->maxOutputChannels > 1 ? 2 : 1;
+    output_para.channelCount = ochan_num;
+    output_para.sampleFormat = paFloat32;
+    output_para.suggestedLatency = Pa_GetDeviceInfo(output_para.device)->defaultLowOutputLatency;
+    output_para.hostApiSpecificStreamInfo = nullptr;
 
-    auto err = Pa_OpenStream(&iss, &input_para, nullptr, sample_rate, period, 0, receiver_callback, this);
+    auto err = Pa_OpenStream(&ios, &input_para, &output_para, sample_rate, period, 0, io_callback, this);
     if (err != paNoError)
     {
-        iss = nullptr;
+        ios = nullptr;
         std::cerr << Pa_GetErrorText(err) << "\n";
     }
+    send_session = std::make_unique<Session>(ichan_num * period * sizeof(float) + HEADER_LEN, 1, ichan_num);
 }
 
-Receiver::~Receiver()
+TransCeiver::~TransCeiver()
 {
-    if (iss)
+    if (ios)
     {
-        Pa_CloseStream(iss);
+        stop();
     }
 }
 
-void Receiver::listen()
+bool TransCeiver::connect(const std::string &ip, short port)
 {
-    auto err = Pa_StartStream(iss);
-    // 1. Create an AudioBuffer
-    AudioFile<float> audioFile;
-    AudioFile<float>::AudioBuffer buffer;
-    // 2. Set to (e.g.) two channels
-    buffer.resize(channels);
-    audioFile.setSampleRate(CUSTOM_SAMPLE_RATE);
+    udp::resolver resolver(io_context);
+    asio::error_code ec;
 
-    std::vector<float> pcm_buf;
-    while (pcm_buf.size() < 10 * channels * CUSTOM_SAMPLE_RATE)
+    dest = *resolver.resolve(udp::v4(), ip, std::to_string(port), ec).begin();
+    if (ec)
     {
-        std::unique_lock<std::mutex> lck(mtx);
-        if (cond.wait_for(lck, std::chrono::seconds(1), [this]()
-                          { return ready; }))
+        std::cerr << ec << "\n";
+        return false;
+    }
+    return true;
+}
+
+void TransCeiver::start()
+{
+    if (!ios)
+    {
+        return;
+    }
+    Pa_StartStream(ios);
+    do_receive();
+    io_thd = std::make_unique<std::thread>([this]()
+                                           { io_context.run(); });
+}
+
+void TransCeiver::stop()
+{
+    if (ios)
+    {
+        Pa_CloseStream(ios);
+        ios = nullptr;
+    }
+    io_context.stop();
+    if (io_thd)
+    {
+        io_thd->join();
+    }
+}
+
+void TransCeiver::play(const std::string &filename)
+{
+    WAVFile wav_file(2, 48'000, 32);
+    if (wav_file.open(filename))
+    {
+        auto bytes = 2 * period * sizeof(float);
+        auto interval = period * 1000 / 48'000;
+        auto tp = std::chrono::system_clock::now();
+        for (size_t i = 0; i < wav_file.size(); i += bytes)
         {
-            std::copy(frames.get(), frames.get() + channels * period, std::back_inserter(pcm_buf));
-            ready = false;
+            send_session->assemble_pack(token + 1, wav_file.data() + i, bytes);
+            sock.async_send_to(send_session->buf.data(), dest, [](std::error_code /*ec*/, std::size_t) {});
+            send_session->buf.consume(bytes + HEADER_LEN);
+            tp += std::chrono::milliseconds(interval);
+            std::this_thread::sleep_until(tp);
         }
-        printf("%lu\n", pcm_buf.size());
     }
-
-    for (size_t i = 0; i < pcm_buf.size(); i++)
-    {
-        buffer[i % 2 ? 1 : 0].push_back(pcm_buf[i]);
-        // for (size_t j = 0; j < channels; j++)
-        // {
-        //     buffer[j].push_back(pcm_buf[i++]);
-        // }
-    }
-
-    bool ok = audioFile.setAudioBuffer(buffer);
-    // 5. Put into the AudioFile object
-    audioFile.save("audioFile.wav");
 }
 
-void Receiver::recv_pcm_frames(const float *input)
+void TransCeiver::do_receive()
 {
+    udp::endpoint sender_endpoint;
+    sock.async_receive_from(asio::buffer(recv_buf), sender_endpoint, [this](std::error_code ec, std::size_t bytes)
+                            {
+        if (!ec && bytes > HEADER_LEN && validate_pack())
+        {
+            auto sender = recv_buf[0];
+            auto chan = (unsigned char)recv_buf[1];
+            if (sessions.find(sender) == sessions.end())
+            {
+                sessions.insert({sender, std::make_unique<Session>(period * chan * sizeof(float), 8, chan)});
+            }
+            sessions.at(recv_buf[0])->store_data(recv_buf.data() + HEADER_LEN, bytes - HEADER_LEN);
+        }
+        do_receive(); });
+}
+
+bool TransCeiver::validate_pack() const
+{
+    auto chan_num = (unsigned char)recv_buf[1];
+    if (chan_num != MONO_CHAN && chan_num != DUAL_CHAN)
     {
-        std::lock_guard<std::mutex> grd(mtx);
-        std::copy_n(input, channels * period, frames.get());
-        ready = true;
+        return false;
     }
-    cond.notify_one();
+
+    if (recv_buf[2] != MAGIC_NUM_1 || recv_buf[3] != MAGIC_NUM_2)
+    {
+        return false;
+    }
+    return true;
+}
+
+void TransCeiver::send_pcm_frames(const void *input)
+{
+    auto bytes = ichan_num * period * sizeof(float);
+    send_session->assemble_pack(token, reinterpret_cast<const char *>(input), bytes);
+    sock.async_send_to(send_session->buf.data(), dest, [](std::error_code /*ec*/, std::size_t) {});
+    // debug
+    // wav_file.write(reinterpret_cast<const char *>(input), bytes);
+    // if (wav_file.size() > sample_rate * 2 * 4)
+    // {
+    //     printf("save wav\n");
+    //     wav_file.save("rec.wav");
+    // }
+    send_session->buf.consume(bytes + HEADER_LEN);
+}
+
+void TransCeiver::recv_pcm_frames(void *output)
+{
+    std::memset(output, 0, ochan_num * period * sizeof(float));
+    for (auto &s : sessions)
+    {
+        auto out = reinterpret_cast<float *>(output);
+        s.second->load_data(period * s.second->chan * sizeof(float));
+        auto ssrc = reinterpret_cast<float *>(s.second->out_buf);
+        mix_channels(out, ssrc, ochan_num, s.second->chan, period);
+    }
 }
