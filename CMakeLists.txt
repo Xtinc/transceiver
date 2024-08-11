@@ -10,6 +10,13 @@ add_library(asio INTERFACE)
 target_include_directories(asio INTERFACE "D:\\asio\\include")
 target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0601)
 
-add_executable(transceiver transceiver.cpp main.cpp)
-target_link_libraries(transceiver portaudio_static asio)
+#libtransceiver
+aux_source_directory(src TRANS_FILES)
+add_library(libtransceiver ${TRANS_FILES})
+target_include_directories(libtransceiver PUBLIC include)
+target_link_libraries(libtransceiver INTERFACE asio)
+target_link_libraries(libtransceiver PRIVATE portaudio_static)
 
+
+add_executable(transceiver main.cpp)
+target_link_libraries(transceiver libtransceiver)
