@@ -1,5 +1,5 @@
-#ifndef AUDIO_PROTOCOL_HEADER
-#define AUDIO_PROTOCOL_HEADER
+#ifndef PROTOCOL_HEADER
+#define PROTOCOL_HEADER
 
 #include <cstdlib>
 #include <cinttypes>

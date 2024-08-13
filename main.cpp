@@ -1,4 +1,5 @@
 #include "protocol.h"
+#include "audiostream.h"
 #include <chrono>
 #include <thread>
 #include <iostream>

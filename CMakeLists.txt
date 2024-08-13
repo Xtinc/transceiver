@@ -16,8 +16,8 @@ endif(MSVC)
 aux_source_directory(src TRANS_FILES)
 add_library(libtransceiver ${TRANS_FILES})
 target_include_directories(libtransceiver PUBLIC include)
-target_link_libraries(libtransceiver INTERFACE asio)
-# target_link_libraries(libtransceiver PRIVATE portaudio_static)
+target_link_libraries(libtransceiver PUBLIC asio)
+target_link_libraries(libtransceiver PRIVATE portaudio_static)
 
 
 add_executable(transceiver main.cpp)
