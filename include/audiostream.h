@@ -48,7 +48,7 @@ public:
 
     void stop();
 
-    void read_pcm_frames(void *input);
+    void read_pcm_frames(const void *input);
 
 private:
     const unsigned char token;

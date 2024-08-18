@@ -174,10 +174,14 @@ IAStream::IAStream(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodS
     input_para.suggestedLatency = input_default_info->defaultLowInputLatency;
     input_para.hostApiSpecificStreamInfo = nullptr;
 
-    auto err = Pa_OpenStream(&is, &input_para, NULL, fs, ps, 0, io_callback, this);
+    auto err = Pa_OpenStream(&is, &input_para, NULL, fs, ps, 0, input_callback, this);
     if (err != paNoError)
     {
         is = nullptr;
         AUDIO_ERROR_PRINT(Pa_GetErrorText(err));
     }
+}
+
+void IAStream::read_pcm_frames(const void *input)
+{
 }
