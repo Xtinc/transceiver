@@ -1,31 +1,55 @@
-#ifndef AUDIO_WAVE_FILE_HEADER
-#define AUDIO_WAVE_FILE_HEADER
+#ifndef AUDIO_WAVEFILE_HEADER
+#define AUDIO_WAVEFILE_HEADER
+
 #include <cinttypes>
 #include <fstream>
 #include <vector>
 
-enum class Error
+enum class WavErrorCode : int
 {
-    kNoError = 0,
-    kFailedToOpen,
-    kNotOpen,
-    kInvalidFormat,
-    kWriteError,
-    kReadError,
-    kInvalidSeek
+    NoError = 0,
+    FailedToOpen,
+    NotOpen,
+    InvalidFormat,
+    WriteError,
+    ReadError,
+    InvalidSeek
 };
 
-enum OpenMode
+inline const char *WavError2str(const WavErrorCode &wav_ec)
 {
-    kIn,
-    kOut
-};
+    switch (wav_ec)
+    {
+    case WavErrorCode::NoError:
+        return "No Error";
+    case WavErrorCode::FailedToOpen:
+        return "Failed To Open";
+    case WavErrorCode::NotOpen:
+        return "Not Open";
+    case WavErrorCode::InvalidFormat:
+        return "Invalid Format";
+    case WavErrorCode::WriteError:
+        return "Write Error";
+    case WavErrorCode::ReadError:
+        return "Read Error";
+    case WavErrorCode::InvalidSeek:
+        return "Invalid Seek";
+    default:
+        return nullptr;
+    }
+}
 
-class HeaderList;
+class ChunkList;
 
 class WavFile
 {
-public:
+  public:
+    enum mode
+    {
+        in,
+        out
+    };
+
     struct RIFFChunk
     {
         char chunk_id[4];
@@ -58,21 +82,28 @@ public:
         DataChunk data;
     };
 
-public:
+  public:
     WavFile();
     ~WavFile();
 
-    Error Open(const std::string &path, OpenMode mode);
+    WavErrorCode open(const std::string &path, mode mode);
 
-    Error Read(std::vector<float> *output);
+    // output should have a length more than frame_number*channel_number
+    WavErrorCode read(int16_t *output, uint64_t frame_number);
 
-    Error Read(uint64_t frame_number, std::vector<float> *output);
+    WavErrorCode read(std::vector<int16_t> &output, uint64_t frame_number);
 
-    Error Write(const std::vector<float> &data, bool clip = false);
+    WavErrorCode read(std::vector<int16_t> &output);
 
-    Error Seek(uint64_t frame_index);
+    WavErrorCode write(const int16_t *input, uint64_t frame_number);
 
-    uint64_t Tell() const;
+    WavErrorCode write(const std::vector<int16_t> &input, uint64_t frame_number);
+
+    WavErrorCode write(const std::vector<int16_t> &input);
+
+    WavErrorCode seek(uint64_t frame_index);
+
+    uint64_t tell() const;
 
     uint16_t channel_number() const;
     void set_channel_number(uint16_t channel_number);
@@ -85,10 +116,10 @@ public:
 
     uint64_t frame_number() const;
 
-private:
-    Error WriteHeader(uint64_t data_size);
+  private:
+    WavErrorCode write_header(uint64_t data_size);
 
-    Error ReadHeader(HeaderList *headers);
+    WavErrorCode read_header(ChunkList *headers);
 
     uint64_t sample_number() const
     {
@@ -103,14 +134,14 @@ private:
     {
         auto bits_per_sample = header.fmt.bits_per_sample;
         auto bytes_per_sample = bits_per_sample / 8;
-        uint64_t data_index = 0;
+        uint64_t data_index;
         if (ostream.is_open())
         {
-            data_index = static_cast<uint64_t>(ostream.tellp()) - data_offset_;
+            data_index = static_cast<uint64_t>(ostream.tellp()) - data_offset;
         }
         else if (istream.is_open())
         {
-            data_index = static_cast<uint64_t>(istream.tellg()) - data_offset_;
+            data_index = static_cast<uint64_t>(istream.tellg()) - data_offset;
         }
         else
         {
@@ -124,8 +155,7 @@ private:
         auto bits_per_sample = header.fmt.bits_per_sample;
         auto bytes_per_sample = bits_per_sample / 8;
 
-        std::streampos stream_index =
-            data_offset_ + (sample_idx * bytes_per_sample);
+        std::streampos stream_index = data_offset + (sample_idx * bytes_per_sample);
         if (ostream.is_open())
         {
             ostream.seekp(stream_index);
@@ -136,11 +166,11 @@ private:
         }
     }
 
-private:
+  private:
     mutable std::ifstream istream;
     mutable std::ofstream ostream;
-    Header header;
-    uint64_t data_offset_;
+    Header header{};
+    uint64_t data_offset{};
 };
 
 #endif
