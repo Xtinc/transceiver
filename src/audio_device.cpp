@@ -10,70 +10,70 @@
 
 namespace
 {
-int get_specified_device(const std::string &card)
-{
-    if (card == "default_input")
+    int get_specified_device(const std::string &card)
     {
-        return Pa_GetDefaultInputDevice();
-    }
-    else if (card == "default_output")
-    {
-        return Pa_GetDefaultOutputDevice();
-    }
-    else
-    {
-        auto dev_num = Pa_GetDeviceCount();
-        if (dev_num < 0)
+        if (card == "default_input")
         {
-            AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(dev_num));
-            return paNoDevice;
+            return Pa_GetDefaultInputDevice();
         }
-        std::string card_name, sub_card_name;
-        auto pos = card.find(',');
-        if (pos != std::string::npos)
+        else if (card == "default_output")
         {
-            card_name = card.substr(0, pos);
-            sub_card_name = card.substr(pos);
+            return Pa_GetDefaultOutputDevice();
         }
         else
         {
-            card_name = card;
-        }
-
-        for (int i = 0; i < dev_num; i++)
-        {
-            std::string dev_name = Pa_GetDeviceInfo(i)->name;
-            AUDIO_INFO_PRINT("search snd card:%s\n", dev_name.c_str());
-            if (dev_name.find(card_name) != std::string::npos)
+            auto dev_num = Pa_GetDeviceCount();
+            if (dev_num < 0)
             {
-                if (sub_card_name.empty())
-                {
-                    return i;
-                }
+                AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(dev_num));
+                return paNoDevice;
+            }
+            std::string card_name, sub_card_name;
+            auto pos = card.find(',');
+            if (pos != std::string::npos)
+            {
+                card_name = card.substr(0, pos);
+                sub_card_name = card.substr(pos);
+            }
+            else
+            {
+                card_name = card;
+            }
 
-                if (dev_name.find(sub_card_name) != std::string::npos)
+            for (int i = 0; i < dev_num; i++)
+            {
+                std::string dev_name = Pa_GetDeviceInfo(i)->name;
+                AUDIO_INFO_PRINT("search snd card:%s\n", dev_name.c_str());
+                if (dev_name.find(card_name) != std::string::npos)
                 {
-                    return i;
+                    if (sub_card_name.empty())
+                    {
+                        return i;
+                    }
+
+                    if (dev_name.find(sub_card_name) != std::string::npos)
+                    {
+                        return i;
+                    }
                 }
             }
+            return paNoDevice;
         }
-        return paNoDevice;
     }
-}
 
-int output_callback(const void *, void *outputBuffer, unsigned long frame_number, const PaStreamCallbackTimeInfo *,
-                    PaStreamCallbackFlags, void *userData)
-{
-    reinterpret_cast<AudioDevice *>(userData)->transfer_pcm_data((int16_t *)outputBuffer, (int)frame_number);
-    return paContinue;
-}
+    int output_callback(const void *, void *outputBuffer, unsigned long frame_number, const PaStreamCallbackTimeInfo *,
+                        PaStreamCallbackFlags, void *userData)
+    {
+        reinterpret_cast<AudioDevice *>(userData)->transfer_pcm_data((int16_t *)outputBuffer, (int)frame_number);
+        return paContinue;
+    }
 
-int input_callback(const void *inputBuffer, void *, unsigned long frame_number, const PaStreamCallbackTimeInfo *,
-                   PaStreamCallbackFlags, void *userData)
-{
-    reinterpret_cast<AudioDevice *>(userData)->transfer_pcm_data((int16_t *)inputBuffer, (int)frame_number);
-    return paContinue;
-}
+    int input_callback(const void *inputBuffer, void *, unsigned long frame_number, const PaStreamCallbackTimeInfo *,
+                       PaStreamCallbackFlags, void *userData)
+    {
+        reinterpret_cast<AudioDevice *>(userData)->transfer_pcm_data((int16_t *)inputBuffer, (int)frame_number);
+        return paContinue;
+    }
 } // namespace
 
 // AudioService
@@ -100,7 +100,8 @@ void AudioService::start()
     }
     for (std::size_t i = 0; i < 2; ++i)
     {
-        io_thds.emplace_back([this]() { io_ctx.run(); });
+        io_thds.emplace_back([this]()
+                             { io_ctx.run(); });
     }
 }
 
@@ -160,14 +161,15 @@ bool PhsyIADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     input_para.sampleFormat = paInt16;
     input_para.suggestedLatency = in_default_info->defaultLowInputLatency;
     input_para.hostApiSpecificStreamInfo = nullptr;
-    if (fs != in_default_info->defaultSampleRate)
+    auto err = Pa_OpenStream(&device, &input_para, nullptr, fs, ps, 0, input_callback, this);
+    if (err != paNoError)
     {
         AUDIO_INFO_PRINT("require fs %d, resample from %f\n", fs, in_default_info->defaultSampleRate);
         stream->set_resampler_parameter((int)in_default_info->defaultSampleRate, fs, chan);
+        int resample_period = ceil_div(ps * in_default_info->defaultSampleRate, fs);
+        err = Pa_OpenStream(&device, &input_para, nullptr, in_default_info->defaultSampleRate, resample_period, 0,
+                            input_callback, this);
     }
-    int resample_period = ceil_div(ps * in_default_info->defaultSampleRate, fs);
-    auto err = Pa_OpenStream(&device, &input_para, nullptr, in_default_info->defaultSampleRate, resample_period, 0,
-                             input_callback, this);
     if (err != paNoError)
     {
         AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
@@ -322,7 +324,7 @@ bool WaveOADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
         return false;
     }
     oastream = static_cast<OAStreamImpl *>(cls);
-    max_chan = chan = 2;
+    max_chan = chan = 1;
     if (fs == 0)
     {
         fs = 48000;
@@ -342,8 +344,6 @@ bool WaveOADevice::start()
         AUDIO_ERROR_PRINT("device created failed. would not be opened.\n");
         return false;
     }
-
-    io_ctx.post([this]() { async_task(oastream->ps, 1000 * oastream->ps / oastream->fs); });
     return true;
 }
 
@@ -353,21 +353,20 @@ bool WaveOADevice::stop()
     return true;
 }
 
-void WaveOADevice::async_task(int ps, int interv)
+bool WaveOADevice::async_task(int interv)
 {
-    timer.expires_after(asio::chrono::milliseconds(interv - 1));
-    timer.async_wait([this, ps, interv](const asio::error_code &ec) {
-        if (ec)
-        {
-            return;
-        }
-        oastream->write_pcm_frames(pick_ups, ps);
-        if (!ofs.write((const char *)pick_ups, (std::streamsize)(sizeof(int16_t) * ps)))
-        {
-            return;
-        }
-        async_task(ps, interv);
-    });
+    auto frame_number = ceil_div(interv * oastream->fs, 1000);
+    oastream->write_pcm_frames(pick_ups, frame_number);
+    if (!ofs.write((const char *)pick_ups, (std::streamsize)(sizeof(int16_t) * frame_number)))
+    {
+        return false;
+    }
+    return true;
+}
+
+bool WaveOADevice::enable_external_loop() const
+{
+    return true;
 }
 
 // Wave Input Device
@@ -447,43 +446,6 @@ bool WaveIADevice::async_task(int interv)
 bool WaveIADevice::enable_external_loop() const
 {
     return true;
-}
-
-void WaveIADevice::async_task(int ps, int interv)
-{
-    timer.expires_after(asio::chrono::milliseconds(interv - 1));
-    timer.async_wait([this, ps, interv](const asio::error_code &ec) {
-        if (ec)
-        {
-            return;
-        }
-
-        if (ifs.tell() + ps >= ifs.frame_number())
-        {
-            ifs.seek(0);
-        }
-
-        auto err = ifs.read(pick_ups, ps);
-        if (err != WavErrorCode::NoError)
-        {
-            AUDIO_ERROR_PRINT("%s\n", WavError2str(err));
-            return;
-        }
-        if (iastream->sampler)
-        {
-            int16_t *out = pick_ups;
-            size_t out_frames = 0;
-            iastream->sampler->commit(pick_ups, ps, out, out_frames);
-            iastream->read_raw_frames(out, (int)out_frames);
-            iastream->read_pcm_frames(out, (int)out_frames);
-        }
-        else
-        {
-            iastream->read_raw_frames(pick_ups, ps);
-            iastream->read_pcm_frames(pick_ups, ps);
-        }
-        async_task(ps, interv);
-    });
 }
 
 // Phys Multi Input Device

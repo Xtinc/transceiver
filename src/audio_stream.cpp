@@ -53,7 +53,7 @@ void OAStream::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int inpu
 OAStreamImpl::OAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period,
                            const std::string &_hw_name, bool _enable_network)
     : token(_token), enable_network(_enable_network), fs(enum2val(_bandwidth)), ps(enum2val(_period)), chan_num(0),
-      max_chan(0), recv_buf(nullptr), oas_ready(false)
+      max_chan(0), recv_buf(nullptr), oas_ready(false), timer(SERVICE)
 {
     if (_hw_name.find(".pcm") != std::string::npos)
     {
@@ -107,7 +107,13 @@ bool OAStreamImpl::start()
             return false;
         }
 
-        asio::post(SERVICE, [self = shared_from_this()]() { self->do_receive(); });
+        asio::post(SERVICE, [self = shared_from_this()]()
+                   { self->do_receive(); });
+    }
+
+    if (odevice->enable_external_loop())
+    {
+        exec_external_loop();
     }
 
     AUDIO_INFO_PRINT("start oastream\n");
@@ -143,6 +149,27 @@ void OAStreamImpl::write_pcm_frames(int16_t *output, int frame_number)
     }
 }
 
+void OAStreamImpl::exec_external_loop()
+{
+    if (!oas_ready)
+    {
+        return;
+    }
+    auto interval = ceil_div(ps * 1000, fs);
+    timer.expires_after(asio::chrono::milliseconds(interval));
+    timer.async_wait([self = shared_from_this(), interval](const asio::error_code &ec)
+                     {
+        if (ec)
+        {
+            return;
+        }
+        if (!self->odevice->async_task(interval))
+        {
+            return;
+        }
+        self->exec_external_loop(); });
+}
+
 void OAStreamImpl::do_receive()
 {
     if (!oas_ready)
@@ -152,7 +179,8 @@ void OAStreamImpl::do_receive()
     static udp::endpoint sender_endpoint;
     sock->async_receive_from(
         asio::buffer(recv_buf, PCM_CUSTOM_PERIOD_SIZE * 6), sender_endpoint,
-        [self = shared_from_this()](std::error_code ec, std::size_t bytes) {
+        [self = shared_from_this()](std::error_code ec, std::size_t bytes)
+        {
             if (!ec && PacketHeader::validate(self->recv_buf, bytes))
             {
                 auto sender = self->recv_buf[0];
@@ -388,6 +416,11 @@ void IAStreamImpl::set_resampler_parameter(int fsi, int fso, int chan)
 
 void IAStreamImpl::read_raw_frames(const int16_t *input, int frame_number)
 {
+    if (!cb0)
+    {
+        return;
+    }
+
     session->store_data((const char *)input, frame_number * sizeof(int16_t) * max_chan);
 }
 
@@ -429,13 +462,13 @@ void IAStreamImpl::copy_pcm_frames()
     session->load_data(PCM_CUSTOM_PERIOD_SIZE * max_chan * sizeof(int16_t));
     cb0((int16_t *)session->out_buf, max_chan, PCM_CUSTOM_PERIOD_SIZE, usr_data0);
     timer0.expires_after(asio::chrono::microseconds(PCM_CUSTOM_SAMPLE_INRV));
-    timer0.async_wait([self = shared_from_this()](const asio::error_code &ec) {
+    timer0.async_wait([self = shared_from_this()](const asio::error_code &ec)
+                      {
         if (ec)
         {
             return;
         }
-        self->copy_pcm_frames();
-    });
+        self->copy_pcm_frames(); });
 }
 
 void IAStreamImpl::exec_external_loop()
@@ -446,7 +479,8 @@ void IAStreamImpl::exec_external_loop()
     }
     auto interval = ceil_div(ps * 1000, fs);
     timer1.expires_after(asio::chrono::milliseconds(interval - 1));
-    timer1.async_wait([self = shared_from_this(), interval](const asio::error_code &ec) {
+    timer1.async_wait([self = shared_from_this(), interval](const asio::error_code &ec)
+                      {
         if (ec)
         {
             return;
@@ -455,8 +489,7 @@ void IAStreamImpl::exec_external_loop()
         {
             return;
         }
-        self->exec_external_loop();
-    });
+        self->exec_external_loop(); });
 }
 
 // AudioPlayer

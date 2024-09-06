@@ -3,33 +3,33 @@
 
 namespace
 {
-constexpr char AUDIO_PACKET_MONO_CHAN = 1;
-constexpr char AUDIO_PACKET_DUAL_CHAN = 2;
-constexpr char MINIMUM_AUDIO_ENCODER_IDX = enum2val(AudioEncoderFormat::PCM);
-constexpr char MAXIMUM_AUDIO_ENCODER_IDX = enum2val(AudioEncoderFormat::OPUS);
-constexpr uint64_t fixedFraction = 1LL << 32;
-constexpr double normFixed = 1.0 / (1LL << 32);
+    constexpr char AUDIO_PACKET_MONO_CHAN = 1;
+    constexpr char AUDIO_PACKET_DUAL_CHAN = 2;
+    constexpr char MINIMUM_AUDIO_ENCODER_IDX = enum2val(AudioEncoderFormat::PCM);
+    constexpr char MAXIMUM_AUDIO_ENCODER_IDX = enum2val(AudioEncoderFormat::OPUS);
+    constexpr uint64_t fixedFraction = 1LL << 32;
+    constexpr double normFixed = 1.0 / (1LL << 32);
 
-uint64_t ReSampleS16LE(const int16_t *input, int16_t *output, int fsi, int fso, uint64_t input_ps, uint32_t channels)
-{
-    uint64_t output_ps = input_ps * fso / fsi;
-    double stepDist = ((double)fsi / (double)fso);
-    uint64_t step = ((uint64_t)(stepDist * fixedFraction + 0.5));
-    uint64_t curOffset = 0;
-    for (size_t i = 0; i < output_ps; i += 1)
+    uint64_t ReSampleS16LE(const int16_t *input, int16_t *output, int fsi, int fso, uint64_t input_ps, uint32_t channels)
     {
-        for (size_t c = 0; c < channels; c += 1)
+        uint64_t output_ps = input_ps * fso / fsi;
+        double stepDist = ((double)fsi / (double)fso);
+        uint64_t step = ((uint64_t)(stepDist * fixedFraction + 0.5));
+        uint64_t curOffset = 0;
+        for (size_t i = 0; i < output_ps; i += 1)
         {
-            *output++ =
-                (int16_t)(input[c] + (input[c + channels] - input[c]) *
-                                         ((double)(curOffset >> 32) + ((curOffset & (fixedFraction - 1)) * normFixed)));
+            for (size_t c = 0; c < channels; c += 1)
+            {
+                *output++ =
+                    (int16_t)(input[c] + (input[c + channels] - input[c]) *
+                                             ((double)(curOffset >> 32) + ((curOffset & (fixedFraction - 1)) * normFixed)));
+            }
+            curOffset += step;
+            input += (curOffset >> 32) * channels;
+            curOffset &= (fixedFraction - 1);
         }
-        curOffset += step;
-        input += (curOffset >> 32) * channels;
-        curOffset &= (fixedFraction - 1);
+        return output_ps;
     }
-    return output_ps;
-}
 } // namespace
 
 bool PacketHeader::validate(const char *data, size_t len)
