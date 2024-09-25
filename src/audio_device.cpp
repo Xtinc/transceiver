@@ -156,7 +156,7 @@ bool PhsyIADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     input_para.device = device_number;
     auto in_default_info = Pa_GetDeviceInfo(input_para.device);
     max_chan = in_default_info->maxInputChannels;
-    chan = max_chan > 1 ? 2 : 1;
+    max_chan = chan = max_chan > 1 ? 2 : 1;
     input_para.channelCount = chan;
     input_para.sampleFormat = paInt16;
     input_para.suggestedLatency = in_default_info->defaultLowInputLatency;
@@ -253,7 +253,7 @@ bool PhsyOADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     output_para.device = device_number;
     auto output_default_info = Pa_GetDeviceInfo(output_para.device);
     max_chan = output_default_info->maxOutputChannels;
-    chan = max_chan > 1 ? 2 : 1;
+    max_chan = chan = max_chan > 1 ? 2 : 1;
     if (fs == 0)
     {
         fs = output_default_info->defaultSampleRate;

@@ -146,6 +146,7 @@ private:
   net_endpoints net_dests;
 
   usocket_ptr sock;
+  std::mutex dest_mtx;
   asio::steady_timer timer0;
   asio::steady_timer timer1;
   AudioInputCallBack cb0;

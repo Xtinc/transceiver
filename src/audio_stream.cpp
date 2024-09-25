@@ -61,7 +61,7 @@ OAStreamImpl::OAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, Audi
     }
     else if (_hw_name.find(".multi") != std::string::npos)
     {
-        odevice = std::make_unique<MultiOADevice>(3, 10, 14);
+        odevice = std::make_unique<MultiOADevice>(3, 11, 16);
     }
     else
     {
@@ -213,15 +213,15 @@ void OAStreamImpl::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int 
     {
         loc_sessions.insert(
             {input_token, std::make_unique<SessionData>(ps * input_chan * sizeof(int16_t), 3, input_chan)});
-        samplers.insert({input_token, std::make_unique<LocEncoder>(sample_rate, fs, chan_num)});
+        samplers.insert({input_token, std::make_unique<LocEncoder>(sample_rate, fs, input_chan)});
         AUDIO_INFO_PRINT("new connection: %u\n", input_token);
     }
     int16_t *decode_data = nullptr;
-    size_t decode_length = 0;
+    size_t decode_frame = 0;
     if (samplers.at(input_token)
-            ->commit((int16_t *)data, input_period * sizeof(int16_t) * input_chan, decode_data, decode_length))
+            ->commit((int16_t *)data, input_period * sizeof(int16_t) * input_chan, decode_data, decode_frame))
     {
-        loc_sessions.at(input_token)->store_data((const char *)decode_data, decode_length);
+        loc_sessions.at(input_token)->store_data((const char *)decode_data, decode_frame * input_chan * sizeof(int16_t));
     }
 }
 
@@ -286,8 +286,7 @@ IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, Audi
     }
     else if (_hw_name.find(".multi") != std::string::npos)
     {
-        // idevice = std::make_unique<MultiIADevice>(0, 7, 14);
-        idevice = std::make_unique<MultiIADevice>(3, 10, 14);
+        idevice = std::make_unique<MultiIADevice>(0, 8, 16);
     }
     else
     {
@@ -374,6 +373,7 @@ void IAStreamImpl::stop()
 
 void IAStreamImpl::connect(const std::shared_ptr<OAStreamImpl> &sink)
 {
+    std::lock_guard<std::mutex> grd(dest_mtx);
     loc_dests.emplace_back(sink);
 }
 
@@ -394,6 +394,7 @@ bool IAStreamImpl::connect(const std::string &ip, uint16_t port)
         AUDIO_ERROR_PRINT("%s\n", ec.message().c_str());
         return false;
     }
+    std::lock_guard<std::mutex> grd(dest_mtx);
     net_dests.push_back(std::move(dest));
     return true;
 }
@@ -431,6 +432,7 @@ void IAStreamImpl::read_pcm_frames(const int16_t *input, int frame_number)
         return;
     }
 
+    std::lock_guard<std::mutex> grd(dest_mtx);
     for (const auto &dest : loc_dests)
     {
         if (auto np = dest.lock())
