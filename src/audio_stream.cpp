@@ -219,7 +219,7 @@ void OAStreamImpl::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int 
     int16_t *decode_data = nullptr;
     size_t decode_frame = 0;
     if (samplers.at(input_token)
-            ->commit((int16_t *)data, input_period * sizeof(int16_t) * input_chan, decode_data, decode_frame))
+            ->commit((int16_t *)data, input_period, decode_data, decode_frame))
     {
         loc_sessions.at(input_token)->store_data((const char *)decode_data, decode_frame * input_chan * sizeof(int16_t));
     }
