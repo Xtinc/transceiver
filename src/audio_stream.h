@@ -84,7 +84,7 @@ private:
   std::map<uint8_t, sampler_ptr> samplers;
   std::map<uint8_t, session_ptr> net_sessions;
   std::map<uint8_t, session_ptr> loc_sessions;
-  std::mutex recv_mtx;
+  std::mutex dest_mtx;
   asio::steady_timer timer;
   usocket_ptr sock;
   char *recv_buf;

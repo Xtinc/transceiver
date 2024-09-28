@@ -186,7 +186,7 @@ void OAStreamImpl::do_receive()
             {
                 auto sender = self->recv_buf[0];
                 auto chan = self->recv_buf[1];
-                std::lock_guard<std::mutex> grd(self->recv_mtx);
+                std::lock_guard<std::mutex> grd(self->dest_mtx);
                 if (self->net_sessions.find(sender) == self->net_sessions.end())
                 {
                     auto session = std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 6, chan);
@@ -209,7 +209,7 @@ void OAStreamImpl::do_receive()
 void OAStreamImpl::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                                    const int16_t *data)
 {
-    std::lock_guard<std::mutex> grd(recv_mtx);
+    std::lock_guard<std::mutex> grd(dest_mtx);
     if (loc_sessions.find(input_token) == loc_sessions.end())
     {
         loc_sessions.insert(
