@@ -190,11 +190,11 @@ bool NetDecoder::commit(const char *data, size_t len, const char *&out_data, siz
             pack_lost++;
         }
     }
-    if (iseq_last && iseq_last % 500 == 0)
-    {
-        AUDIO_INFO_PRINT("connection %u: reorder %.2f%%, T_send:%.2fus, T_recv:%.2fus, jitter: %.2fus\n", token,
-                         100 * (double)pack_lost / iseq_last, send_interv, recv_interv, jitter);
-    }
+    // if (iseq_last && iseq_last % 500 == 0)
+    // {
+    //     AUDIO_INFO_PRINT("connection %u: reorder %.2f%%, T_send:%.2fus, T_recv:%.2fus, jitter: %.2fus\n", token,
+    //                      100 * (double)pack_lost / iseq_last, send_interv, recv_interv, jitter);
+    // }
 
     snow_last = snow;
     rnow_last = rnow;

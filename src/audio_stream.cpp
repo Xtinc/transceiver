@@ -189,7 +189,7 @@ void OAStreamImpl::do_receive()
                 std::lock_guard<std::mutex> grd(self->dest_mtx);
                 if (self->net_sessions.find(sender) == self->net_sessions.end())
                 {
-                    auto session = std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 6, chan);
+                    // auto session = std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 6, chan);
                     self->decoders.insert({sender, std::make_unique<NetDecoder>(sender, chan, self->fs)});
                     self->net_sessions.insert(
                         {sender, std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 6, chan)});
