@@ -18,6 +18,7 @@ inline constexpr uint16_t token2port(unsigned char token)
 void start_audio_service()
 {
     AudioService::GetService().start();
+    AUDIO_INFO_PRINT("compiled at %s %s\n", __DATE__, __TIME__);
 }
 
 void stop_audio_service()
@@ -495,7 +496,6 @@ void IAStreamImpl::exec_external_loop()
 }
 
 // AudioPlayer
-
 AudioPlayer::AudioPlayer(unsigned char _token)
 {
     impl = std::make_unique<AudioPlayerImpl>(_token);

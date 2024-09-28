@@ -226,149 +226,6 @@ void PhsyIADevice::transfer_pcm_data(int16_t *input, int frame_number)
     }
 }
 
-// Phys Output Device
-PhsyOADevice::~PhsyOADevice()
-{
-    if (!device)
-    {
-        return;
-    }
-
-    auto err = Pa_CloseStream(device);
-    if (err != paNoError)
-    {
-        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
-    }
-}
-
-bool PhsyOADevice::create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan)
-{
-    auto device_number = get_specified_device(name);
-    if (device_number == paNoDevice)
-    {
-        AUDIO_ERROR_PRINT("Invalid device\n");
-        return false;
-    }
-    PaStreamParameters output_para;
-    output_para.device = device_number;
-    auto output_default_info = Pa_GetDeviceInfo(output_para.device);
-    max_chan = output_default_info->maxOutputChannels;
-    max_chan = chan = max_chan > 1 ? 2 : 1;
-    if (fs == 0)
-    {
-        fs = output_default_info->defaultSampleRate;
-    }
-    ps = ceil_div(ps * fs, 1000);
-    output_para.channelCount = chan;
-    output_para.sampleFormat = paInt16;
-    output_para.suggestedLatency = Pa_GetDeviceInfo(output_para.device)->defaultLowOutputLatency;
-    output_para.hostApiSpecificStreamInfo = nullptr;
-
-    auto err = Pa_OpenStream(&device, nullptr, &output_para, fs, ps, 0, output_callback, this);
-    if (err != paNoError)
-    {
-        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
-        return false;
-    }
-    stream = static_cast<OAStreamImpl *>(cls);
-    AUDIO_INFO_PRINT("open odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", output_default_info->name, chan,
-                     max_chan, fs, ps);
-    ready = true;
-    return true;
-}
-
-bool PhsyOADevice::start()
-{
-    if (!ready)
-    {
-        AUDIO_ERROR_PRINT("device created failed. would not be opened.\n");
-        return false;
-    }
-
-    auto err = Pa_StartStream(device);
-    if (err != paNoError)
-    {
-        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
-        return false;
-    }
-    return true;
-}
-
-bool PhsyOADevice::stop()
-{
-    auto err = Pa_StopStream(device);
-    if (err != paNoError)
-    {
-        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
-        return false;
-    }
-    return true;
-}
-
-void PhsyOADevice::transfer_pcm_data(int16_t *input, int frame_number)
-{
-    stream->write_pcm_frames(input, frame_number);
-}
-
-// Wave Output Device
-WaveOADevice::~WaveOADevice()
-{
-    delete[] pick_ups;
-}
-
-bool WaveOADevice::create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan)
-{
-    ofs.open(name, std::ios::binary);
-    if (!ofs)
-    {
-        return false;
-    }
-    oastream = static_cast<OAStreamImpl *>(cls);
-    max_chan = chan = 1;
-    if (fs == 0)
-    {
-        fs = 48000;
-    }
-    ps = ceil_div(ps * fs, 1000);
-    pick_ups = new int16_t[ps * chan];
-    AUDIO_INFO_PRINT("file odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", name.c_str(), chan, max_chan,
-                     fs, ps);
-    ready = true;
-    return true;
-}
-
-bool WaveOADevice::start()
-{
-    if (!ready)
-    {
-        AUDIO_ERROR_PRINT("device created failed. would not be opened.\n");
-        return false;
-    }
-    return true;
-}
-
-bool WaveOADevice::stop()
-{
-    timer.cancel();
-    return true;
-}
-
-bool WaveOADevice::async_task(int interv)
-{
-    auto frame_number = ceil_div(interv * oastream->fs, 1000);
-    oastream->write_pcm_frames(pick_ups, frame_number);
-    if (!ofs.write((const char *)pick_ups, (std::streamsize)(sizeof(int16_t) * frame_number)))
-    {
-        return false;
-    }
-    return true;
-}
-
-bool WaveOADevice::enable_external_loop() const
-{
-    return true;
-}
-
 // Wave Input Device
 WaveIADevice::~WaveIADevice()
 {
@@ -553,6 +410,149 @@ void MultiIADevice::transfer_pcm_data(int16_t *input, int frame_number)
         input += max_pick;
     }
     stream->read_pcm_frames(pick_ups, frame_number);
+}
+
+// Phys Output Device
+PhsyOADevice::~PhsyOADevice()
+{
+    if (!device)
+    {
+        return;
+    }
+
+    auto err = Pa_CloseStream(device);
+    if (err != paNoError)
+    {
+        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
+    }
+}
+
+bool PhsyOADevice::create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan)
+{
+    auto device_number = get_specified_device(name);
+    if (device_number == paNoDevice)
+    {
+        AUDIO_ERROR_PRINT("Invalid device\n");
+        return false;
+    }
+    PaStreamParameters output_para;
+    output_para.device = device_number;
+    auto output_default_info = Pa_GetDeviceInfo(output_para.device);
+    max_chan = output_default_info->maxOutputChannels;
+    max_chan = chan = max_chan > 1 ? 2 : 1;
+    if (fs == 0)
+    {
+        fs = output_default_info->defaultSampleRate;
+    }
+    ps = ceil_div(ps * fs, 1000);
+    output_para.channelCount = chan;
+    output_para.sampleFormat = paInt16;
+    output_para.suggestedLatency = Pa_GetDeviceInfo(output_para.device)->defaultLowOutputLatency;
+    output_para.hostApiSpecificStreamInfo = nullptr;
+
+    auto err = Pa_OpenStream(&device, nullptr, &output_para, fs, ps, 0, output_callback, this);
+    if (err != paNoError)
+    {
+        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
+        return false;
+    }
+    stream = static_cast<OAStreamImpl *>(cls);
+    AUDIO_INFO_PRINT("open odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", output_default_info->name, chan,
+                     max_chan, fs, ps);
+    ready = true;
+    return true;
+}
+
+bool PhsyOADevice::start()
+{
+    if (!ready)
+    {
+        AUDIO_ERROR_PRINT("device created failed. would not be opened.\n");
+        return false;
+    }
+
+    auto err = Pa_StartStream(device);
+    if (err != paNoError)
+    {
+        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
+        return false;
+    }
+    return true;
+}
+
+bool PhsyOADevice::stop()
+{
+    auto err = Pa_StopStream(device);
+    if (err != paNoError)
+    {
+        AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
+        return false;
+    }
+    return true;
+}
+
+void PhsyOADevice::transfer_pcm_data(int16_t *input, int frame_number)
+{
+    stream->write_pcm_frames(input, frame_number);
+}
+
+// Wave Output Device
+WaveOADevice::~WaveOADevice()
+{
+    delete[] pick_ups;
+}
+
+bool WaveOADevice::create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan)
+{
+    ofs.open(name, std::ios::binary);
+    if (!ofs)
+    {
+        return false;
+    }
+    oastream = static_cast<OAStreamImpl *>(cls);
+    max_chan = chan = 1;
+    if (fs == 0)
+    {
+        fs = 48000;
+    }
+    ps = ceil_div(ps * fs, 1000);
+    pick_ups = new int16_t[ps * chan];
+    AUDIO_INFO_PRINT("file odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", name.c_str(), chan, max_chan,
+                     fs, ps);
+    ready = true;
+    return true;
+}
+
+bool WaveOADevice::start()
+{
+    if (!ready)
+    {
+        AUDIO_ERROR_PRINT("device created failed. would not be opened.\n");
+        return false;
+    }
+    return true;
+}
+
+bool WaveOADevice::stop()
+{
+    timer.cancel();
+    return true;
+}
+
+bool WaveOADevice::async_task(int interv)
+{
+    auto frame_number = ceil_div(interv * oastream->fs, 1000);
+    oastream->write_pcm_frames(pick_ups, frame_number);
+    if (!ofs.write((const char *)pick_ups, (std::streamsize)(sizeof(int16_t) * frame_number)))
+    {
+        return false;
+    }
+    return true;
+}
+
+bool WaveOADevice::enable_external_loop() const
+{
+    return true;
 }
 
 // Phys Multi Output Device

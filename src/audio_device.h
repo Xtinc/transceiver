@@ -58,53 +58,6 @@ private:
   IAStreamImpl *stream;
 };
 
-// Phys Output Device
-class PhsyOADevice final : public AudioDevice
-{
-public:
-  PhsyOADevice() : device(nullptr), stream(nullptr) {};
-  ~PhsyOADevice() override;
-
-  bool create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan) override;
-
-  bool start() override;
-
-  bool stop() override;
-
-  void transfer_pcm_data(int16_t *input, int frame_number) override;
-
-private:
-  PaStream *device;
-  OAStreamImpl *stream;
-};
-
-// Wave Output Device
-class WaveOADevice final : public AudioDevice
-{
-public:
-  WaveOADevice(asio::io_context &_io) : io_ctx(_io), timer(io_ctx), oastream(nullptr), pick_ups(nullptr)
-  {
-  }
-  ~WaveOADevice() override;
-
-  bool create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan) override;
-
-  bool start() override;
-
-  bool stop() override;
-
-  bool async_task(int interv) override;
-
-  bool enable_external_loop() const override;
-
-private:
-  asio::io_context &io_ctx;
-  asio::steady_timer timer;
-  std::ofstream ofs;
-  OAStreamImpl *oastream;
-  int16_t *pick_ups;
-};
-
 // Wave Input Device
 class WaveIADevice final : public AudioDevice
 {
@@ -154,6 +107,53 @@ private:
   const int input_l;
   const int input_r;
   const int max_pick;
+  int16_t *pick_ups;
+};
+
+// Phys Output Device
+class PhsyOADevice final : public AudioDevice
+{
+public:
+  PhsyOADevice() : device(nullptr), stream(nullptr) {};
+  ~PhsyOADevice() override;
+
+  bool create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan) override;
+
+  bool start() override;
+
+  bool stop() override;
+
+  void transfer_pcm_data(int16_t *input, int frame_number) override;
+
+private:
+  PaStream *device;
+  OAStreamImpl *stream;
+};
+
+// Wave Output Device
+class WaveOADevice final : public AudioDevice
+{
+public:
+  WaveOADevice(asio::io_context &_io) : io_ctx(_io), timer(io_ctx), oastream(nullptr), pick_ups(nullptr)
+  {
+  }
+  ~WaveOADevice() override;
+
+  bool create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan) override;
+
+  bool start() override;
+
+  bool stop() override;
+
+  bool async_task(int interv) override;
+
+  bool enable_external_loop() const override;
+
+private:
+  asio::io_context &io_ctx;
+  asio::steady_timer timer;
+  std::ofstream ofs;
+  OAStreamImpl *oastream;
   int16_t *pick_ups;
 };
 
