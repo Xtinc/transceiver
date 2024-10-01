@@ -135,7 +135,7 @@ asio::streambuf &NetEncoder::prepare(const char *data, size_t len, size_t &out_l
 NetDecoder::NetDecoder(uint8_t _token, uint8_t _channel, int _bandwidth)
     : token(_token), chann(_channel), decoder(nullptr), dec_buf(nullptr), rsc_buf(nullptr),
       fsi(ceil_div(_bandwidth, 8000) * 8000), fso(_bandwidth), rnow_last(0), snow_last(0), iseq_last(0), pack_lost(0),
-      jitter(0), recv_interv(0), send_interv(0)
+      jitter(0), recv_interv(0), send_interv(0), lost_rate(0), avg_jitter(0), avg_recv_interv(0), avg_send_interv(0)
 {
     auto err = 0;
     decoder = opus_decoder_create(fsi, chann, &err);
@@ -190,11 +190,15 @@ bool NetDecoder::commit(const char *data, size_t len, const char *&out_data, siz
             pack_lost++;
         }
     }
-    // if (iseq_last && iseq_last % 500 == 0)
-    // {
-    //     AUDIO_INFO_PRINT("connection %u: reorder %.2f%%, T_send:%.2fus, T_recv:%.2fus, jitter: %.2fus\n", token,
-    //                      100 * (double)pack_lost / iseq_last, send_interv, recv_interv, jitter);
-    // }
+
+    if (iseq_last && iseq_last % 200 == 0)
+    {
+        std::lock_guard<std::mutex> grd(mtx);
+        lost_rate = 100 * (double)pack_lost / iseq_last;
+        avg_send_interv = send_interv;
+        avg_recv_interv = recv_interv;
+        avg_jitter = jitter;
+    }
 
     snow_last = snow;
     rnow_last = rnow;
@@ -212,6 +216,12 @@ bool NetDecoder::commit(const char *data, size_t len, const char *&out_data, siz
     }
 
     return true;
+}
+
+ChannelInfo NetDecoder::statistic_info()
+{
+    std::lock_guard<std::mutex> grd(mtx);
+    return {token, lost_rate, avg_jitter, avg_recv_interv, avg_send_interv};
 }
 
 LocEncoder::LocEncoder(int inSampleRate, int outSampleRate, int channel)

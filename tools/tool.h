@@ -3,13 +3,14 @@
 
 #include "audio_stream.h"
 #include "audio_network.h"
+#include <deque>
 
-class WaveGrapha
+class WaveGraph
 {
 public:
-    WaveGrapha(AudioPeriodSize max_len);
-    ~WaveGrapha();
-
+    WaveGraph(AudioPeriodSize max_len);
+    ~WaveGraph();
+    
     std::vector<int> operator()(int width, int height);
 
     void set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx);
@@ -19,12 +20,36 @@ private:
     int16_t *data;
 };
 
+class EnergyGraph
+{
+public:
+    EnergyGraph(AudioPeriodSize max_len);
+
+    std::vector<int> operator()(int width, int height);
+
+    void set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx);
+
+private:
+    int length;
+    std::deque<double> data;
+};
+
+struct UiElement
+{
+    UiElement(AudioPeriodSize ps) : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps) {}
+    ChannelInfo info;
+    WaveGraph wave_left;
+    WaveGraph wave_right;
+    EnergyGraph energy_left;
+    EnergyGraph energy_right;
+};
+
 class Observer : public std::enable_shared_from_this<Observer>
 {
 public:
-    using fresh_cb = std::function<void(WaveGrapha *lgraph, WaveGrapha *rgraph)>;
+    using fresh_cb = std::function<void()>;
 
-    Observer(OAStream &default_oas, WaveGrapha *graph0, WaveGrapha *graph1, AudioPeriodSize interval_ms);
+    Observer(UiElement *element, AudioPeriodSize interval_ms);
     ~Observer();
 
     bool start();
@@ -47,9 +72,7 @@ private:
     std::map<uint8_t, session_ptr> net_sessions;
     fresh_cb cb;
 
-    OAStream &oas;
-    WaveGrapha *lgraph;
-    WaveGrapha *rgraph;
+    UiElement *ui_element;
     std::mutex dest_mtx;
     asio::steady_timer timer;
     usocket_ptr sock;

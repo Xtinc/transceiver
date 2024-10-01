@@ -31,7 +31,8 @@ enum class AudioEncoderFormat : uint8_t
     OPUS = 1
 };
 
-template <typename T> constexpr typename std::underlying_type<T>::type enum2val(T e)
+template <typename T>
+constexpr typename std::underlying_type<T>::type enum2val(T e)
 {
     return static_cast<typename std::underlying_type<T>::type>(e);
 }
@@ -80,6 +81,15 @@ constexpr AudioBandWidth cast_uint8_as_bandwidth(uint8_t sample_rate)
     }
 }
 
+struct ChannelInfo
+{
+    uint8_t token;
+    double lost_rate;
+    double jitter;
+    double recv_interv;
+    double send_interv;
+};
+
 struct PacketHeader
 {
     uint8_t sender;
@@ -107,11 +117,11 @@ class SessionData
             m_flag.clear(std::memory_order_release);
         }
 
-      private:
+    private:
         std::atomic_flag &m_flag;
     };
 
-  public:
+public:
     SessionData(size_t blk_sz, size_t blk_num, int _chan);
 
     ~SessionData();
@@ -120,13 +130,13 @@ class SessionData
 
     void load_data(size_t len);
 
-  public:
+public:
     const int chan;
     const size_t max_len;
     asio::streambuf buf;
     char *out_buf;
 
-  private:
+private:
     std::atomic_flag ready = ATOMIC_FLAG_INIT;
     std::ostream os;
     std::istream is;
@@ -134,13 +144,13 @@ class SessionData
 
 class LocEncoder
 {
-  public:
+public:
     LocEncoder(int input_fs, int output_fs, int channel);
     ~LocEncoder();
 
     bool commit(int16_t *input, size_t input_len, int16_t *&output, size_t &output_size);
 
-  private:
+private:
     const int fsi;
     const int fso;
     const int chan;
@@ -150,13 +160,13 @@ class LocEncoder
 
 class NetEncoder
 {
-  public:
+public:
     NetEncoder(uint8_t _sender, uint8_t _channel, int _period, AudioBandWidth _bandwidth);
     ~NetEncoder();
 
     asio::streambuf &prepare(const char *data, size_t len, size_t &out_len);
 
-  private:
+private:
     const int period;
     PacketHeader head;
     asio::streambuf buf;
@@ -167,13 +177,15 @@ class NetEncoder
 
 class NetDecoder
 {
-  public:
+public:
     NetDecoder(uint8_t _token, uint8_t _channel, int _bandwidth);
     ~NetDecoder();
 
     bool commit(const char *data, size_t len, const char *&out_data, size_t &out_len);
 
-  private:
+    ChannelInfo statistic_info();
+
+private:
     const uint8_t token;
     const uint8_t chann;
 
@@ -190,6 +202,12 @@ class NetDecoder
     double jitter;
     double recv_interv;
     double send_interv;
+
+    std::mutex mtx;
+    double lost_rate;
+    double avg_jitter;
+    double avg_recv_interv;
+    double avg_send_interv;
 };
 
 #endif

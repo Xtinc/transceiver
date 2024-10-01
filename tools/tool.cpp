@@ -8,7 +8,7 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include <iostream>
 #include <thread>
-#include <condition_variable>
+#include <cmath>
 
 using udp = asio::ip::udp;
 
@@ -18,21 +18,23 @@ static constexpr auto DEBUG_TOOL_SAMPLE_RATE = AudioBandWidth::Full;
 static constexpr auto DEBUG_TOOL_FRESH_INTERV = AudioPeriodSize::INR_40MS;
 static constexpr auto MAXIMUM_TRANSMISSION_SIZE = 1024 * 6;
 
-static constexpr int SMALL_WINDOWS_SIZE[2] = {11, 60};
-static constexpr int MEDIUM_WINDOWS_SIZE[2] = {21, 100};
+static constexpr int SMALL_WINDOWS_SIZE[2] = {21, 60};
+static constexpr int MEDIUM_WINDOWS_SIZE[2] = {21, 120};
 
-WaveGrapha::WaveGrapha(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
+static std::mutex fresh_mtx;
+
+WaveGraph::WaveGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
 {
     data = new int16_t[length];
     std::memset(data, 0, length * sizeof(int16_t));
 }
 
-WaveGrapha::~WaveGrapha()
+WaveGraph::~WaveGraph()
 {
     delete[] data;
 }
 
-std::vector<int> WaveGrapha::operator()(int width, int height)
+std::vector<int> WaveGraph::operator()(int width, int height)
 {
     std::vector<int> result;
     result.reserve(width);
@@ -45,14 +47,13 @@ std::vector<int> WaveGrapha::operator()(int width, int height)
     return result;
 }
 
-void WaveGrapha::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx)
+void WaveGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx)
 {
     if (frames_num != length)
     {
         return;
     }
 
-    std::memset(data, 0, sizeof(int16_t) * length);
     if (ssrc_chan == 1)
     {
         std::memcpy(data, ssrc, sizeof(int16_t) * length);
@@ -66,8 +67,62 @@ void WaveGrapha::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, in
     }
 }
 
-Observer::Observer(OAStream &default_oas, WaveGrapha *graph0, WaveGrapha *graph1, AudioPeriodSize interval_ms)
-    : fresh_interv(enum2val(interval_ms)), fs(enum2val(DEBUG_TOOL_SAMPLE_RATE)), ps(fs * fresh_interv / 1000), oas(default_oas), lgraph(graph0), rgraph(graph1), timer(SERVICE), recv_buf(nullptr), oas_ready(false)
+EnergyGraph::EnergyGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
+{
+}
+
+std::vector<int> EnergyGraph::operator()(int width, int height)
+{
+    std::vector<int> result;
+    result.reserve(width);
+    while (data.size() < width)
+    {
+        data.push_back(0);
+    }
+
+    while (data.size() > width)
+    {
+        data.pop_front();
+    }
+
+    for (size_t i = 0; i < width; i++)
+    {
+        auto amp = data[i] > 0 ? data[i] : 1e-4;
+        auto db = 20 * std::log10(amp / 32767) + 40;
+        auto val = (int)(db * height / 40);
+        result.emplace_back(val);
+    }
+    return result;
+}
+
+void EnergyGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx)
+{
+    if (frames_num != length)
+    {
+        return;
+    }
+    double sum = 0;
+    if (ssrc_chan == 1)
+    {
+        for (int i = 0; i < frames_num; i++)
+        {
+            sum += std::abs(ssrc[i]);
+        }
+    }
+    else if (ssrc_chan == 2)
+    {
+        for (int i = 0; i < frames_num; i++)
+        {
+            sum += std::abs(ssrc[i + chan_idx]);
+        }
+    }
+    sum /= frames_num;
+    data.push_back(sum);
+}
+
+Observer::Observer(UiElement *element, AudioPeriodSize interval_ms)
+    : fresh_interv(enum2val(interval_ms)), fs(enum2val(DEBUG_TOOL_SAMPLE_RATE)), ps(fs * fresh_interv / 1000),
+      ui_element(element), timer(SERVICE), recv_buf(nullptr), oas_ready(false)
 {
     recv_buf = new char[MAXIMUM_TRANSMISSION_SIZE];
 }
@@ -136,7 +191,6 @@ void Observer::do_receive()
                 std::lock_guard<std::mutex> grd(self->dest_mtx);
                 if (self->net_sessions.find(sender) == self->net_sessions.end())
                 {
-                    // auto session = std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 18, chan);
                     self->decoders.insert({sender, std::make_unique<NetDecoder>(sender, chan, self->fs)});
                     self->net_sessions.insert(
                         {sender, std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 18, chan)});
@@ -160,11 +214,6 @@ void Observer::fresh_graph()
         return;
     }
 
-    if (!lgraph || !rgraph)
-    {
-        return;
-    }
-
     {
         std::lock_guard<std::mutex> grd(dest_mtx);
         auto s = net_sessions.begin();
@@ -173,15 +222,18 @@ void Observer::fresh_graph()
             auto ichan = s->second->chan;
             auto idata = (const int16_t *)s->second->out_buf;
             s->second->load_data(ps * ichan * sizeof(int16_t));
-            oas.direct_push_pcm(s->first, ichan, ps, fs, idata);
-            lgraph->set_data(idata, ichan, ps, 0);
-            rgraph->set_data(idata, ichan, ps, 1);
+            std::lock_guard<std::mutex> grd2(fresh_mtx);
+            ui_element->wave_left.set_data(idata, ichan, ps, 0);
+            ui_element->wave_right.set_data(idata, ichan, ps, 1);
+            ui_element->energy_left.set_data(idata, ichan, ps, 0);
+            ui_element->energy_right.set_data(idata, ichan, ps, 1);
+            ui_element->info = decoders.at(s->first)->statistic_info();
         }
     }
 
     if (cb)
     {
-        cb(lgraph, rgraph);
+        cb();
     }
 
     timer.expires_at(now + asio::chrono::milliseconds(fresh_interv));
@@ -194,36 +246,121 @@ void Observer::fresh_graph()
         self->fresh_graph(); });
 }
 
-ftxui::Element construct_graph(int height, int width, WaveGrapha &usr_graph, const std::string &title)
+static int fps_count()
+{
+    static int fps0 = 0;
+    static int fps1 = 0;
+    static auto start = std::chrono::steady_clock::now();
+    ++fps0;
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+    if (duration > 1000)
+    {
+        start = now;
+        fps1 = fps0 * duration / 1000;
+        fps0 = 0;
+    }
+    return fps1;
+}
+
+static ftxui::Element construct_graph(int height, int width, WaveGraph &usr_graph0, WaveGraph &usr_graph1)
 {
     using namespace ftxui;
-    auto win = window(text(title) | hcenter | bold,
-                      hbox({
-                          vbox({text("+1.0 "),
-                                filler(),
-                                text("+0.5 "),
-                                filler(),
-                                text("±0.0 "),
-                                filler(),
-                                text("-0.5 "),
-                                filler(),
-                                text("-1.0 ")}),
-                          graph(std::ref(usr_graph)) | flex | color(Color::BlueLight),
-                      }));
-    win |= size(HEIGHT, GREATER_THAN, height);
-    win |= size(WIDTH, GREATER_THAN, width);
-    return win;
+    auto lwin =
+        hbox({
+            vbox({text("+1.0 "),
+                  filler(),
+                  text("+0.5 "),
+                  filler(),
+                  text("±0.0 "),
+                  filler(),
+                  text("-0.5 "),
+                  filler(),
+                  text("-1.0 ")}),
+            graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight),
+        });
+    auto rwin =
+        hbox({
+            vbox({text("+1.0 "),
+                  filler(),
+                  text("+0.5 "),
+                  filler(),
+                  text("±0.0 "),
+                  filler(),
+                  text("-0.5 "),
+                  filler(),
+                  text("-1.0 ")}),
+            graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight),
+        });
+    lwin |= size(HEIGHT, GREATER_THAN, height);
+    lwin |= size(WIDTH, GREATER_THAN, width);
+    rwin |= size(HEIGHT, GREATER_THAN, height);
+    rwin |= size(WIDTH, GREATER_THAN, width);
+    return vbox({text("Left Channel") | hcenter, lwin, separator(), text("Right Channel") | hcenter, rwin});
+}
+
+static ftxui::Element construct_graph(int height, int width, EnergyGraph &usr_graph0, EnergyGraph &usr_graph1)
+{
+    using namespace ftxui;
+    auto lwin =
+        hbox({
+            vbox({text("0dbFS"),
+                  filler(),
+                  text("-10  "),
+                  filler(),
+                  text("-20  "),
+                  filler(),
+                  text("-30  "),
+                  filler(),
+                  text("-40 ")}),
+            graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight),
+        });
+    auto rwin =
+        hbox({
+            vbox({text("0dbFS"),
+                  filler(),
+                  text("-10  "),
+                  filler(),
+                  text("-20  "),
+                  filler(),
+                  text("-30  "),
+                  filler(),
+                  text("-40 ")}),
+            graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight),
+        });
+    lwin |= size(HEIGHT, GREATER_THAN, height);
+    lwin |= size(WIDTH, GREATER_THAN, width);
+    rwin |= size(HEIGHT, GREATER_THAN, height);
+    rwin |= size(WIDTH, GREATER_THAN, width);
+    return vbox({text("Left Channel") | hcenter, lwin, separator(), text("Right Channel") | hcenter, rwin});
+}
+
+static ftxui::Element construct_infos(const ChannelInfo &sta_info)
+{
+    using namespace ftxui;
+    Elements content;
+    char tmp[20]{};
+    sprintf(tmp, "RX   :%7.1fus", sta_info.recv_interv);
+    content.push_back(text(tmp) | hcenter);
+    sprintf(tmp, "TX   :%7.1fus", sta_info.send_interv);
+    content.push_back(text(tmp) | hcenter);
+    sprintf(tmp, "Jc2c :%7.1fus", sta_info.jitter);
+    content.push_back(text(tmp) | hcenter);
+    sprintf(tmp, "Lost :%7.3f%% ", sta_info.lost_rate);
+    content.push_back(text(tmp) | hcenter);
+
+    return vbox({
+        window(text("FPS") | hcenter | bold, text(std::to_string(fps_count())) | hcenter),
+        window(text("Statistics No." + std::to_string((unsigned int)sta_info.token)) | hcenter | bold, vbox(std::move(content))),
+    });
 }
 
 int main(int argc, char **argv)
 {
     start_audio_service();
     {
-        WaveGrapha wave_lgraph(DEBUG_TOOL_FRESH_INTERV);
-        WaveGrapha wave_rgraph(DEBUG_TOOL_FRESH_INTERV);
-        OAStream oas(254, "default_output", DEBUG_TOOL_SAMPLE_RATE, DEBUG_TOOL_FRESH_INTERV);
-        auto ob = std::make_shared<Observer>(oas, &wave_lgraph, &wave_rgraph, DEBUG_TOOL_FRESH_INTERV);
-        oas.start();
+        UiElement ui_element{DEBUG_TOOL_FRESH_INTERV};
+        auto ob = std::make_shared<Observer>(&ui_element, DEBUG_TOOL_FRESH_INTERV);
         if (!ob->start())
         {
             return 0;
@@ -232,20 +369,43 @@ int main(int argc, char **argv)
         auto screen = ftxui::ScreenInteractive::Fullscreen();
         screen.SetCursor(ftxui::Screen::Cursor{0});
 
-        auto render = ftxui::Renderer(
-            [&wave_lgraph, &wave_rgraph]()
+        int tab_selected = 0;
+        std::vector<std::string> tab_values{"WAVE", "ENERGY"};
+        auto tab_toggle = ftxui::Toggle(&tab_values, &tab_selected);
+        auto tab1 = ftxui::Renderer(
+            [&ui_element, tab_selected]()
             {
-            auto left_win = construct_graph(MEDIUM_WINDOWS_SIZE[0], MEDIUM_WINDOWS_SIZE[1], wave_lgraph, "Left channel");
-            auto right_win = construct_graph(MEDIUM_WINDOWS_SIZE[0], MEDIUM_WINDOWS_SIZE[1], wave_rgraph, "Right channel");
+                return tab_selected == 0 ? construct_graph(SMALL_WINDOWS_SIZE[0], SMALL_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
+            });
+        auto tab2 = ftxui::Renderer(
+            [&ui_element, &tab_selected]()
+            {
+                return tab_selected == 1 ? construct_graph(SMALL_WINDOWS_SIZE[0], SMALL_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
+            });
+        auto tab_container = ftxui::Container::Tab(
+            {tab1, tab2},
+            &tab_selected);
+        auto container = ftxui::Container::Vertical({
+            tab_toggle,
+            tab_container,
+        });
 
-            auto document = ftxui::vbox({std::move(left_win), std::move(right_win)}) | ftxui::flex | ftxui::border;
-            document |= ftxui::size(ftxui::WIDTH, ftxui::LESS_THAN, 120);
-            document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 160);
+        auto renderer = ftxui::Renderer(container, [&tab_toggle, &tab_container, &ui_element]
+                                        {
+            std::lock_guard<std::mutex> grd(fresh_mtx);
+            auto tbc = ftxui::vbox({
+                tab_toggle->Render(),
+                ftxui::separator(),
+                tab_container->Render(),
+            });
+            auto text_box = construct_infos(ui_element.info);
+            auto document = ftxui::window(ftxui::text("Audio Debug Tool " + std::string(__DATE__)) | ftxui::hcenter | ftxui::bold, ftxui::hbox({std::move(tbc) | ftxui::flex, ftxui::separator(), text_box}));
+            document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 48);
             return document; });
 
-        ob->set_callback([&screen](WaveGrapha *lg, WaveGrapha *rg)
+        ob->set_callback([&screen]()
                          { screen.Post(ftxui::Event::Custom); });
-        screen.Loop(render);
+        screen.Loop(renderer);
     }
     stop_audio_service();
     return 0;

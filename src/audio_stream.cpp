@@ -156,15 +156,16 @@ void OAStreamImpl::exec_external_loop()
     {
         return;
     }
+    auto now = std::chrono::steady_clock::now();
     auto interval = ceil_div(ps * 1000, fs);
-    timer.expires_after(asio::chrono::milliseconds(interval));
-    timer.async_wait([self = shared_from_this(), interval](const asio::error_code &ec)
+    if (!odevice->async_task(interval))
+    {
+        return;
+    }
+    timer.expires_at(now + asio::chrono::milliseconds(interval));
+    timer.async_wait([self = shared_from_this()](const asio::error_code &ec)
                      {
         if (ec)
-        {
-            return;
-        }
-        if (!self->odevice->async_task(interval))
         {
             return;
         }
@@ -462,9 +463,10 @@ void IAStreamImpl::copy_pcm_frames()
     {
         return;
     }
+    auto now = std::chrono::steady_clock::now();
     session->load_data(PCM_CUSTOM_PERIOD_SIZE * max_chan * sizeof(int16_t));
     cb0((int16_t *)session->out_buf, max_chan, PCM_CUSTOM_PERIOD_SIZE, usr_data0);
-    timer0.expires_after(asio::chrono::microseconds(PCM_CUSTOM_SAMPLE_INRV));
+    timer0.expires_at(now + asio::chrono::microseconds(PCM_CUSTOM_SAMPLE_INRV));
     timer0.async_wait([self = shared_from_this()](const asio::error_code &ec)
                       {
         if (ec)
@@ -480,15 +482,16 @@ void IAStreamImpl::exec_external_loop()
     {
         return;
     }
+    auto now = std::chrono::steady_clock::now();
     auto interval = ceil_div(ps * 1000, fs);
-    timer1.expires_after(asio::chrono::milliseconds(interval - 1));
-    timer1.async_wait([self = shared_from_this(), interval](const asio::error_code &ec)
+    if (!idevice->async_task(interval))
+    {
+        return;
+    }
+    timer1.expires_at(now + asio::chrono::milliseconds(interval));
+    timer1.async_wait([self = shared_from_this()](const asio::error_code &ec)
                       {
         if (ec)
-        {
-            return;
-        }
-        if (!self->idevice->async_task(interval))
         {
             return;
         }
