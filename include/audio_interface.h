@@ -49,6 +49,8 @@ public:
 
   void stop();
 
+  void connect(const OAStream &other);
+
   void direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                        const int16_t *data);
 

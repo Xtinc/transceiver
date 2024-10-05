@@ -45,6 +45,17 @@ void OAStream::stop()
     impl->stop();
 }
 
+void OAStream::connect(const OAStream &other)
+{
+    if (&other == this)
+    {
+        AUDIO_ERROR_PRINT("can not connect to self\n");
+        return;
+    }
+
+    return impl->connect(other.impl);
+}
+
 void OAStream::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                                const int16_t *data)
 {
@@ -135,6 +146,12 @@ void OAStreamImpl::stop()
     AUDIO_INFO_PRINT("stop oastream\n");
 }
 
+void OAStreamImpl::connect(const std::shared_ptr<OAStreamImpl> &other)
+{
+    std::lock_guard<std::mutex> grd(dest_mtx);
+    loc_dests.emplace_back(other);
+}
+
 void OAStreamImpl::write_pcm_frames(int16_t *output, int frame_number)
 {
     std::memset(output, 0, chan_num * frame_number * sizeof(int16_t));
@@ -147,6 +164,15 @@ void OAStreamImpl::write_pcm_frames(int16_t *output, int frame_number)
     {
         s.second->load_data(ps * s.second->chan * sizeof(int16_t));
         mix_channels((const int16_t *)s.second->out_buf, chan_num, s.second->chan, ps, (int16_t *)output);
+    }
+
+    std::lock_guard<std::mutex> grd(dest_mtx);
+    for (const auto &dest : loc_dests)
+    {
+        if (auto np = dest.lock())
+        {
+            np->direct_push_pcm(token, chan_num, frame_number, fs, output);
+        }
     }
 }
 
@@ -187,7 +213,7 @@ void OAStreamImpl::do_receive()
             {
                 auto sender = self->recv_buf[0];
                 auto chan = self->recv_buf[1];
-                std::lock_guard<std::mutex> grd(self->dest_mtx);
+                std::lock_guard<std::mutex> grd(self->recv_mtx);
                 if (self->net_sessions.find(sender) == self->net_sessions.end())
                 {
                     // auto session = std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 6, chan);
@@ -210,7 +236,7 @@ void OAStreamImpl::do_receive()
 void OAStreamImpl::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                                    const int16_t *data)
 {
-    std::lock_guard<std::mutex> grd(dest_mtx);
+    std::lock_guard<std::mutex> grd(recv_mtx);
     if (loc_sessions.find(input_token) == loc_sessions.end())
     {
         loc_sessions.insert(
@@ -279,7 +305,7 @@ void IAStream::set_callback(AudioInputCallBack _cb, void *_user_data)
 IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period,
                            const std::string &_hw_name, bool _enable_network)
     : token(_token), enable_network(_enable_network), fs(enum2val(_bandwidth)), ps(fs / 1000 * (enum2val(_period))),
-      chan_num(0), max_chan(0), muted(false), timer0(SERVICE), timer1(SERVICE), cb0(nullptr), usr_data0(nullptr),
+      chan_num(0), max_chan(0), muted(false), timer0(SERVICE), timer1(SERVICE), user_cb(nullptr), usr_data(nullptr),
       ias_ready(false)
 {
     if (_hw_name.find(".wav") != std::string::npos)
@@ -310,9 +336,9 @@ IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, Audi
 IAStreamImpl::~IAStreamImpl()
 {
     stop();
-    if (cb1)
+    if (dtor_cb)
     {
-        cb1();
+        dtor_cb();
     }
 }
 
@@ -340,7 +366,7 @@ bool IAStreamImpl::start()
         exec_external_loop();
     }
 
-    if (cb0)
+    if (user_cb)
     {
         copy_pcm_frames();
     }
@@ -403,13 +429,13 @@ bool IAStreamImpl::connect(const std::string &ip, uint16_t port)
 
 void IAStreamImpl::set_callback(AudioInputCallBack _cb, void *_user_data)
 {
-    cb0 = _cb;
-    usr_data0 = _user_data;
+    user_cb = _cb;
+    usr_data = _user_data;
 }
 
 void IAStreamImpl::set_destory_callback(std::function<void()> &&_cb)
 {
-    cb1 = _cb;
+    dtor_cb = _cb;
 }
 
 void IAStreamImpl::set_resampler_parameter(int fsi, int fso, int chan)
@@ -419,7 +445,7 @@ void IAStreamImpl::set_resampler_parameter(int fsi, int fso, int chan)
 
 void IAStreamImpl::read_raw_frames(const int16_t *input, int frame_number)
 {
-    if (!cb0)
+    if (!user_cb)
     {
         return;
     }
@@ -465,7 +491,7 @@ void IAStreamImpl::copy_pcm_frames()
     }
     auto now = std::chrono::steady_clock::now();
     session->load_data(PCM_CUSTOM_PERIOD_SIZE * max_chan * sizeof(int16_t));
-    cb0((int16_t *)session->out_buf, max_chan, PCM_CUSTOM_PERIOD_SIZE, usr_data0);
+    user_cb((int16_t *)session->out_buf, max_chan, PCM_CUSTOM_PERIOD_SIZE, usr_data);
     timer0.expires_at(now + asio::chrono::microseconds(PCM_CUSTOM_SAMPLE_INRV));
     timer0.async_wait([self = shared_from_this()](const asio::error_code &ec)
                       {

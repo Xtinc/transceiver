@@ -61,6 +61,8 @@ public:
 
   void stop();
 
+  void connect(const std::shared_ptr<OAStreamImpl> &other);
+
   void direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                        const int16_t *data);
 
@@ -80,11 +82,14 @@ private:
   int max_chan;
 
   odevice_ptr odevice;
+  std::mutex recv_mtx;
   std::map<uint8_t, decoder_ptr> decoders;
   std::map<uint8_t, sampler_ptr> samplers;
   std::map<uint8_t, session_ptr> net_sessions;
   std::map<uint8_t, session_ptr> loc_sessions;
   std::mutex dest_mtx;
+  loc_endpoints loc_dests;
+  net_endpoints net_dests;
   asio::steady_timer timer;
   usocket_ptr sock;
   char *recv_buf;
@@ -149,9 +154,9 @@ private:
   std::mutex dest_mtx;
   asio::steady_timer timer0;
   asio::steady_timer timer1;
-  AudioInputCallBack cb0;
-  void *usr_data0;
-  std::function<void()> cb1;
+  AudioInputCallBack user_cb;
+  void *usr_data;
+  std::function<void()> dtor_cb;
   std::atomic_bool ias_ready;
 };
 
