@@ -161,8 +161,13 @@ bool PhsyIADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     input_para.sampleFormat = paInt16;
     input_para.suggestedLatency = in_default_info->defaultLowInputLatency;
     input_para.hostApiSpecificStreamInfo = nullptr;
-    auto err = Pa_OpenStream(&device, &input_para, nullptr, fs, ps, 0, input_callback, this);
-    if (err != paNoError)
+
+    PaError err;
+    if (Pa_IsFormatSupported(&input_para, nullptr, fs) == paNoError)
+    {
+        err = Pa_OpenStream(&device, &input_para, nullptr, fs, ps, 0, input_callback, this);
+    }
+    else
     {
         AUDIO_INFO_PRINT("require fs %d, resample from %f\n", fs, in_default_info->defaultSampleRate);
         stream->set_resampler_parameter((int)in_default_info->defaultSampleRate, fs, chan);
