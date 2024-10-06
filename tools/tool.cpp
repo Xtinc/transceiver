@@ -18,10 +18,24 @@ static constexpr auto DEBUG_TOOL_SAMPLE_RATE = AudioBandWidth::Full;
 static constexpr auto DEBUG_TOOL_FRESH_INTERV = AudioPeriodSize::INR_40MS;
 static constexpr auto MAXIMUM_TRANSMISSION_SIZE = 1024 * 6;
 
-static constexpr int SMALL_WINDOWS_SIZE[2] = {21, 60};
-static constexpr int MEDIUM_WINDOWS_SIZE[2] = {21, 120};
-
+static constexpr int GRAPH_WINDOWS_SIZE[2] = {21, 60};
 static std::mutex fresh_mtx;
+
+inline float HanningWindows(int idx, int length)
+{
+    return 0.54f - 0.46f * std::cos(2.f * 3.1415927f * idx / length);
+}
+
+inline void float2RGB(float zero2one, int &r, int &g, int &b)
+{
+    auto x = (int)(zero2one * 256 * 256 * 256);
+    r = x % 256;
+    g = ((x - r) / 256 % 256);
+    b = ((x - r - g * 256) / (256 * 256) % 256);
+    r = round(float(r / 256));
+    g = round(float(g / 256));
+    b = round(float(b / 256));
+}
 
 WaveGraph::WaveGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
 {
@@ -87,7 +101,7 @@ std::vector<int> EnergyGraph::operator()(int width, int height)
 
     for (size_t i = 0; i < width; i++)
     {
-        auto amp = data[i] > 0 ? data[i] : 1e-4;
+        auto amp = data[i] > 0 ? data[i] : 32767e-2;
         auto db = 20 * std::log10(amp / 32767) + 40;
         auto val = (int)(db * height / 40);
         result.emplace_back(val);
@@ -118,6 +132,75 @@ void EnergyGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, i
     }
     sum /= frames_num;
     data.push_back(sum);
+}
+
+FreqGraph::FreqGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000), freq_len(length / 2 + 1)
+{
+    fft_cfg = kiss_fft_alloc(length, 0, nullptr, nullptr);
+    cxi = new kiss_fft_cpx[length];
+    cxo = new kiss_fft_cpx[length];
+}
+
+FreqGraph::~FreqGraph()
+{
+    delete[] cxo;
+    delete[] cxi;
+    kiss_fft_free(fft_cfg);
+}
+
+std::vector<int> FreqGraph::operator()(int width, int height)
+{
+    std::vector<int> result;
+    result.reserve(width);
+    cxo[0].r = 0;
+    cxo[0].i = 0;
+    cxo[freq_len].r = 0;
+    cxo[freq_len].i = 0;
+
+    auto last_idx = 0;
+    for (size_t i = 1; i < width + 1; i++)
+    {
+        auto data_idx = i * freq_len / width;
+        auto sum = 0.0f;
+        for (size_t j = last_idx; j < data_idx; j++)
+        {
+            sum += std::sqrt(cxo[j].r * cxo[j].r + cxo[j].i * cxo[j].i);
+        }
+        sum *= 2.0f / ((data_idx - last_idx) * length);
+
+        auto amp = sum > 0.0f ? sum : 32767e-4;
+        auto db = 20.0f * std::log10(sum / 32767) + 80.0f;
+        auto val = (int)(db * height / 80.0f);
+        result.emplace_back(val);
+        last_idx = data_idx;
+    }
+    return result;
+}
+
+void FreqGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx)
+{
+    if (frames_num != length)
+    {
+        return;
+    }
+
+    if (ssrc_chan == 1)
+    {
+        for (int i = 0; i < frames_num; i++)
+        {
+            cxi[i].r = ssrc[i] * HanningWindows(i, frames_num);
+            cxi[i].i = 0;
+        }
+    }
+    else if (ssrc_chan == 2)
+    {
+        for (int i = 0; i < frames_num; i++)
+        {
+            cxi[i].r = ssrc[2 * i + chan_idx] * HanningWindows(i, frames_num);
+            cxi[i].i = 0;
+        }
+    }
+    kiss_fft(fft_cfg, cxi, cxo);
 }
 
 Observer::Observer(UiElement *element, AudioPeriodSize interval_ms)
@@ -227,6 +310,8 @@ void Observer::fresh_graph()
             ui_element->wave_right.set_data(idata, ichan, ps, 1);
             ui_element->energy_left.set_data(idata, ichan, ps, 0);
             ui_element->energy_right.set_data(idata, ichan, ps, 1);
+            ui_element->freq_left.set_data(idata, ichan, ps, 0);
+            ui_element->freq_right.set_data(idata, ichan, ps, 1);
             ui_element->info = decoders.at(s->first)->statistic_info();
         }
     }
@@ -296,7 +381,7 @@ static ftxui::Element construct_graph(int height, int width, WaveGraph &usr_grap
     lwin |= size(WIDTH, GREATER_THAN, width);
     rwin |= size(HEIGHT, GREATER_THAN, height);
     rwin |= size(WIDTH, GREATER_THAN, width);
-    return vbox({text("Left Channel") | hcenter, lwin, separator(), text("Right Channel") | hcenter, rwin});
+    return vbox({lwin, separator(), rwin});
 }
 
 static ftxui::Element construct_graph(int height, int width, EnergyGraph &usr_graph0, EnergyGraph &usr_graph1)
@@ -332,7 +417,62 @@ static ftxui::Element construct_graph(int height, int width, EnergyGraph &usr_gr
     lwin |= size(WIDTH, GREATER_THAN, width);
     rwin |= size(HEIGHT, GREATER_THAN, height);
     rwin |= size(WIDTH, GREATER_THAN, width);
-    return vbox({text("Left Channel") | hcenter, lwin, separator(), text("Right Channel") | hcenter, rwin});
+    return vbox({lwin, separator(), rwin});
+}
+
+static ftxui::Element construct_graph(int height, int width, FreqGraph &usr_graph0, FreqGraph &usr_graph1, int xaxis_max)
+{
+    using namespace ftxui;
+    auto lwin =
+        hbox({
+            vbox({text("0dbFS"),
+                  filler(),
+                  text("-20  "),
+                  filler(),
+                  text("-40  "),
+                  filler(),
+                  text("-60  "),
+                  filler(),
+                  text("-80 ")}),
+            graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight),
+        });
+    auto rwin =
+        hbox({
+            vbox({text("0dbFS"),
+                  filler(),
+                  text("-20  "),
+                  filler(),
+                  text("-40  "),
+                  filler(),
+                  text("-60  "),
+                  filler(),
+                  text("-80 ")}),
+            graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight),
+        });
+
+    auto xtitle = hbox({text("kHz  "),
+                        text("0"),
+                        filler(),
+                        text(std::to_string(xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 4)),
+                        filler(),
+                        text(std::to_string(3 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 2)),
+                        filler(),
+                        text(std::to_string(5 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(3 * xaxis_max / 4)),
+                        filler(),
+                        text(std::to_string(7 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max))});
+    lwin |= size(HEIGHT, GREATER_THAN, height);
+    lwin |= size(WIDTH, GREATER_THAN, width);
+    rwin |= size(HEIGHT, GREATER_THAN, height);
+    rwin |= size(WIDTH, GREATER_THAN, width);
+    return vbox({lwin, xtitle, rwin});
 }
 
 static ftxui::Element construct_infos(const ChannelInfo &sta_info)
@@ -370,20 +510,26 @@ int main(int argc, char **argv)
         screen.SetCursor(ftxui::Screen::Cursor{0});
 
         int tab_selected = 0;
-        std::vector<std::string> tab_values{"WAVE", "ENERGY"};
+        std::vector<std::string> tab_values{"WAVE", "ENERGY", "FREQUENCY"};
         auto tab_toggle = ftxui::Toggle(&tab_values, &tab_selected);
         auto tab1 = ftxui::Renderer(
             [&ui_element, tab_selected]()
             {
-                return tab_selected == 0 ? construct_graph(SMALL_WINDOWS_SIZE[0], SMALL_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
+                return tab_selected == 0 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
             });
         auto tab2 = ftxui::Renderer(
             [&ui_element, &tab_selected]()
             {
-                return tab_selected == 1 ? construct_graph(SMALL_WINDOWS_SIZE[0], SMALL_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
+                return tab_selected == 1 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
             });
+        auto tab3 = ftxui::Renderer(
+            [&ui_element, &tab_selected]()
+            {
+                return tab_selected == 2 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.freq_left, ui_element.freq_right, enum2val(DEBUG_TOOL_SAMPLE_RATE) / 2000) : ftxui::text("");
+            });
+
         auto tab_container = ftxui::Container::Tab(
-            {tab1, tab2},
+            {tab1, tab2, tab3},
             &tab_selected);
         auto container = ftxui::Container::Vertical({
             tab_toggle,
@@ -400,7 +546,7 @@ int main(int argc, char **argv)
             });
             auto text_box = construct_infos(ui_element.info);
             auto document = ftxui::window(ftxui::text("Audio Debug Tool " + std::string(__DATE__)) | ftxui::hcenter | ftxui::bold, ftxui::hbox({std::move(tbc) | ftxui::flex, ftxui::separator(), text_box}));
-            document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 48);
+            document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 60);
             return document; });
 
         ob->set_callback([&screen]()

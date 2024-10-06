@@ -18,6 +18,7 @@ set(FTXUI_ENABLE_INSTALL OFF)
 add_subdirectory(vendor/opus-1.5.2)
 add_subdirectory(vendor/portaudio-19.7.0)
 add_subdirectory(vendor/FTXUI-5.0.0)
+add_subdirectory(vendor/kissfft-131.1.0)
 
 # libtransceiver
 aux_source_directory(src TRANS_FILES)
@@ -31,7 +32,7 @@ aux_source_directory(tools DEBUG_FILES)
 add_executable(debug_tool ${DEBUG_FILES} ${TRANS_FILES})
 target_include_directories(debug_tool PUBLIC include src)
 target_link_libraries(debug_tool PUBLIC asio)
-target_link_libraries(debug_tool PRIVATE portaudio_static Opus::opus ftxui::dom ftxui::component ftxui::screen)
+target_link_libraries(debug_tool PRIVATE portaudio_static Opus::opus ftxui::dom ftxui::component ftxui::screen kissfft::kissfft)
 
 # test
 # add_subdirectory(test)

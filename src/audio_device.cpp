@@ -299,8 +299,8 @@ bool WaveIADevice::async_task(int interv)
     }
     else
     {
-        iastream->read_raw_frames(pick_ups, frame_number);
-        iastream->read_pcm_frames(pick_ups, frame_number);
+        iastream->read_raw_frames(pick_ups, (int)frame_number);
+        iastream->read_pcm_frames(pick_ups, (int)frame_number);
     }
     return true;
 }

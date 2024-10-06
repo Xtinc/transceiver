@@ -10,7 +10,7 @@ class WaveGraph
 public:
     WaveGraph(AudioPeriodSize max_len);
     ~WaveGraph();
-    
+
     std::vector<int> operator()(int width, int height);
 
     void set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx);
@@ -34,14 +34,36 @@ private:
     std::deque<double> data;
 };
 
+class FreqGraph
+{
+public:
+    FreqGraph(AudioPeriodSize max_len);
+    ~FreqGraph();
+
+    std::vector<int> operator()(int width, int height);
+
+    void set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx);
+
+private:
+    int length;
+    int freq_len;
+    kiss_fft_cfg fft_cfg;
+    kiss_fft_cpx *cxi;
+    kiss_fft_cpx *cxo;
+
+private:
+};
+
 struct UiElement
 {
-    UiElement(AudioPeriodSize ps) : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps) {}
+    UiElement(AudioPeriodSize ps) : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps) {}
     ChannelInfo info;
     WaveGraph wave_left;
     WaveGraph wave_right;
     EnergyGraph energy_left;
     EnergyGraph energy_right;
+    FreqGraph freq_left;
+    FreqGraph freq_right;
 };
 
 class Observer : public std::enable_shared_from_this<Observer>
