@@ -192,6 +192,93 @@ void FreqGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     kiss_fft(fft_cfg, cxi, cxo);
 }
 
+CespGraph::CespGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000), freq_len(length / 2 + 1)
+{
+    fft_cfg1 = kiss_fft_alloc(length, 0, nullptr, nullptr);
+    fft_cfg2 = kiss_fft_alloc(length, 1, nullptr, nullptr);
+    cxi = new kiss_fft_cpx[length];
+    cxo = new kiss_fft_cpx[length];
+}
+
+CespGraph::~CespGraph()
+{
+    delete[] cxo;
+    delete[] cxi;
+    kiss_fft_free(fft_cfg1);
+    kiss_fft_free(fft_cfg2);
+}
+
+std::vector<int> CespGraph::operator()(int width, int height)
+{
+    std::vector<int> result;
+    result.reserve(width);
+
+    for (int i = 0; i < length; i++)
+    {
+        cxi[i].r = std::log10(cxo[i].r * cxo[i].r + cxo[i].i * cxo[i].i) / length;
+        cxi[i].i = 0.0;
+    }
+
+    kiss_fft(fft_cfg2, cxi, cxo);
+    auto min_val = 1e12f;
+    for (int i = 0; i < length; i++)
+    {
+        if (cxo[i].r < min_val)
+        {
+            min_val = cxo[i].r;
+        }
+    }
+    auto last_idx = 0;
+    for (int i = 1; i < width + 1; i++)
+    {
+        auto data_idx = i * freq_len / width;
+        auto sum = 0.0f;
+        for (int j = last_idx; j < data_idx; j++)
+        {
+            sum += cxo[j].r;
+        }
+        sum /= (data_idx - last_idx);
+        result.emplace_back((int)(std::log10(sum - min_val) * 65536));
+        last_idx = data_idx;
+    }
+    auto minmax = std::minmax_element(result.cbegin(), result.cend());
+    auto min_height = *(minmax.first);
+    auto max_height = *(minmax.second);
+    auto ratio = max_height == min_height ? 65536 : max_height - min_height;
+
+    for (auto &e : result)
+    {
+        e = (e - min_height) * height / ratio;
+    }
+    return result;
+}
+
+void CespGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx)
+{
+    if (frames_num != length)
+    {
+        return;
+    }
+
+    if (ssrc_chan == 1)
+    {
+        for (int i = 0; i < frames_num; i++)
+        {
+            cxi[i].r = ssrc[i] * HanningWindows(i, frames_num);
+            cxi[i].i = 0;
+        }
+    }
+    else if (ssrc_chan == 2)
+    {
+        for (int i = 0; i < frames_num; i++)
+        {
+            cxi[i].r = ssrc[2 * i + chan_idx] * HanningWindows(i, frames_num);
+            cxi[i].i = 0;
+        }
+    }
+    kiss_fft(fft_cfg1, cxi, cxo);
+}
+
 Observer::Observer(UiElement *element, AudioPeriodSize interval_ms)
     : fresh_interv(enum2val(interval_ms)), fs(enum2val(DEBUG_TOOL_SAMPLE_RATE)), ps(fs * fresh_interv / 1000),
       ui_element(element), timer(SERVICE), recv_buf(nullptr), oas_ready(false)
@@ -309,6 +396,10 @@ void Observer::fresh_graph()
                 ui_element->freq_left.set_data(idata, ichan, ps, 0);
                 ui_element->freq_right.set_data(idata, ichan, ps, 1);
                 break;
+            case 3:
+                ui_element->cesp_left.set_data(idata, ichan, ps, 0);
+                ui_element->cesp_right.set_data(idata, ichan, ps, 1);
+                break;
 
             default:
                 break;
@@ -353,31 +444,27 @@ static ftxui::Element construct_graph(int height, int width, WaveGraph &usr_grap
 {
     using namespace ftxui;
     auto lwin =
-        hbox({
-            vbox({text("+1.0 "),
-                  filler(),
-                  text("+0.5 "),
-                  filler(),
-                  text("±0.0 "),
-                  filler(),
-                  text("-0.5 "),
-                  filler(),
-                  text("-1.0 ")}),
-            graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight),
-        });
+        hbox({vbox({text("+1.0 "),
+                    filler(),
+                    text("+0.5 "),
+                    filler(),
+                    text("±0.0 "),
+                    filler(),
+                    text("-0.5 "),
+                    filler(),
+                    text("-1.0 ")}),
+              graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight)});
     auto rwin =
-        hbox({
-            vbox({text("+1.0 "),
-                  filler(),
-                  text("+0.5 "),
-                  filler(),
-                  text("±0.0 "),
-                  filler(),
-                  text("-0.5 "),
-                  filler(),
-                  text("-1.0 ")}),
-            graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight),
-        });
+        hbox({vbox({text("+1.0 "),
+                    filler(),
+                    text("+0.5 "),
+                    filler(),
+                    text("±0.0 "),
+                    filler(),
+                    text("-0.5 "),
+                    filler(),
+                    text("-1.0 ")}),
+              graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight)});
     lwin |= size(HEIGHT, GREATER_THAN, height);
     lwin |= size(WIDTH, GREATER_THAN, width);
     rwin |= size(HEIGHT, GREATER_THAN, height);
@@ -389,31 +476,27 @@ static ftxui::Element construct_graph(int height, int width, EnergyGraph &usr_gr
 {
     using namespace ftxui;
     auto lwin =
-        hbox({
-            vbox({text("0dbFS"),
-                  filler(),
-                  text("-10  "),
-                  filler(),
-                  text("-20  "),
-                  filler(),
-                  text("-30  "),
-                  filler(),
-                  text("-40 ")}),
-            graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight),
-        });
+        hbox({vbox({text("0dbFS"),
+                    filler(),
+                    text("-10  "),
+                    filler(),
+                    text("-20  "),
+                    filler(),
+                    text("-30  "),
+                    filler(),
+                    text("-40 ")}),
+              graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight)});
     auto rwin =
-        hbox({
-            vbox({text("0dbFS"),
-                  filler(),
-                  text("-10  "),
-                  filler(),
-                  text("-20  "),
-                  filler(),
-                  text("-30  "),
-                  filler(),
-                  text("-40 ")}),
-            graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight),
-        });
+        hbox({vbox({text("0dbFS"),
+                    filler(),
+                    text("-10  "),
+                    filler(),
+                    text("-20  "),
+                    filler(),
+                    text("-30  "),
+                    filler(),
+                    text("-40 ")}),
+              graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight)});
     lwin |= size(HEIGHT, GREATER_THAN, height);
     lwin |= size(WIDTH, GREATER_THAN, width);
     rwin |= size(HEIGHT, GREATER_THAN, height);
@@ -425,33 +508,79 @@ static ftxui::Element construct_graph(int height, int width, FreqGraph &usr_grap
 {
     using namespace ftxui;
     auto lwin =
-        hbox({
-            vbox({text("0dbFS"),
-                  filler(),
-                  text("-20  "),
-                  filler(),
-                  text("-40  "),
-                  filler(),
-                  text("-60  "),
-                  filler(),
-                  text("-80 ")}),
-            graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight),
-        });
+        hbox({vbox({text("0dbFS"),
+                    filler(),
+                    text("-20  "),
+                    filler(),
+                    text("-40  "),
+                    filler(),
+                    text("-60  "),
+                    filler(),
+                    text("-80 ")}),
+              graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight)});
     auto rwin =
-        hbox({
-            vbox({text("0dbFS"),
-                  filler(),
-                  text("-20  "),
-                  filler(),
-                  text("-40  "),
-                  filler(),
-                  text("-60  "),
-                  filler(),
-                  text("-80 ")}),
-            graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight),
-        });
+        hbox({vbox({text("0dbFS"),
+                    filler(),
+                    text("-20  "),
+                    filler(),
+                    text("-40  "),
+                    filler(),
+                    text("-60  "),
+                    filler(),
+                    text("-80 ")}),
+              graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight)});
 
     auto xtitle = hbox({text("kHz  "),
+                        text("0"),
+                        filler(),
+                        text(std::to_string(xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 4)),
+                        filler(),
+                        text(std::to_string(3 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 2)),
+                        filler(),
+                        text(std::to_string(5 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(3 * xaxis_max / 4)),
+                        filler(),
+                        text(std::to_string(7 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max))});
+    lwin |= size(HEIGHT, GREATER_THAN, height);
+    lwin |= size(WIDTH, GREATER_THAN, width);
+    rwin |= size(HEIGHT, GREATER_THAN, height);
+    rwin |= size(WIDTH, GREATER_THAN, width);
+    return vbox({lwin, xtitle, rwin});
+}
+
+static ftxui::Element construct_graph(int height, int width, CespGraph &usr_graph0, CespGraph &usr_graph1, int xaxis_max)
+{
+    using namespace ftxui;
+    auto lwin =
+        hbox({vbox({text("1.00 "),
+                    filler(),
+                    text("0.75 "),
+                    filler(),
+                    text("0.50 "),
+                    filler(),
+                    text("0.25 "),
+                    filler(),
+                    text("0.00 ")}),
+              graph(std::ref(usr_graph0)) | flex | color(Color::BlueLight)});
+    auto rwin =
+        hbox({vbox({text("1.00 "),
+                    filler(),
+                    text("0.75 "),
+                    filler(),
+                    text("0.50 "),
+                    filler(),
+                    text("0.25 "),
+                    filler(),
+                    text("0.00 ")}),
+              graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight)});
+    auto xtitle = hbox({text("ms   "),
                         text("0"),
                         filler(),
                         text(std::to_string(xaxis_max / 8)),
@@ -510,7 +639,7 @@ int main(int argc, char **argv)
         auto screen = ftxui::ScreenInteractive::TerminalOutput();
         screen.SetCursor(ftxui::Screen::Cursor{0});
 
-        std::vector<std::string> tab_values{"WAVE", "ENERGY", "FREQUENCY"};
+        std::vector<std::string> tab_values{"WAVE", "ENERGY", "STFT", "CESP"};
         auto tab_toggle = ftxui::Toggle(&tab_values, &ui_element.selected);
         auto tab1 = ftxui::Renderer(
             [&ui_element]()
@@ -527,9 +656,14 @@ int main(int argc, char **argv)
             {
                 return ui_element.selected == 2 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.freq_left, ui_element.freq_right, enum2val(DEBUG_TOOL_SAMPLE_RATE) / 2000) : ftxui::text("");
             });
+        auto tab4 = ftxui::Renderer(
+            [&ui_element]()
+            {
+                return ui_element.selected == 3 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.cesp_left, ui_element.cesp_right, enum2val(DEBUG_TOOL_FRESH_INTERV)) : ftxui::text("");
+            });
 
         auto tab_container = ftxui::Container::Tab(
-            {tab1, tab2, tab3},
+            {tab1, tab2, tab3, tab4},
             &ui_element.selected);
         auto container = ftxui::Container::Vertical({
             tab_toggle,
