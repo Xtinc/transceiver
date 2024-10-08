@@ -26,17 +26,6 @@ inline float HanningWindows(int idx, int length)
     return 0.54f - 0.46f * std::cos(2.f * 3.1415927f * idx / length);
 }
 
-inline void float2RGB(float zero2one, int &r, int &g, int &b)
-{
-    auto x = (int)(zero2one * 256 * 256 * 256);
-    r = x % 256;
-    g = ((x - r) / 256 % 256);
-    b = ((x - r - g * 256) / (256 * 256) % 256);
-    r = round(float(r / 256));
-    g = round(float(g / 256));
-    b = round(float(b / 256));
-}
-
 WaveGraph::WaveGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
 {
     data = new int16_t[length];
@@ -76,7 +65,7 @@ void WaveGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     {
         for (int i = 0; i < frames_num; i++)
         {
-            data[i] = ssrc[i + chan_idx];
+            data[i] = ssrc[2 * i + chan_idx];
         }
     }
 }
@@ -127,7 +116,7 @@ void EnergyGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, i
     {
         for (int i = 0; i < frames_num; i++)
         {
-            sum += std::abs(ssrc[i + chan_idx]);
+            sum += std::abs(ssrc[2 * i + chan_idx]);
         }
     }
     sum /= frames_num;
@@ -306,12 +295,24 @@ void Observer::fresh_graph()
             auto idata = (const int16_t *)s->second->out_buf;
             s->second->load_data(ps * ichan * sizeof(int16_t));
             std::lock_guard<std::mutex> grd2(fresh_mtx);
-            ui_element->wave_left.set_data(idata, ichan, ps, 0);
-            ui_element->wave_right.set_data(idata, ichan, ps, 1);
-            ui_element->energy_left.set_data(idata, ichan, ps, 0);
-            ui_element->energy_right.set_data(idata, ichan, ps, 1);
-            ui_element->freq_left.set_data(idata, ichan, ps, 0);
-            ui_element->freq_right.set_data(idata, ichan, ps, 1);
+            switch (ui_element->selected)
+            {
+            case 0:
+                ui_element->wave_left.set_data(idata, ichan, ps, 0);
+                ui_element->wave_right.set_data(idata, ichan, ps, 1);
+                break;
+            case 1:
+                ui_element->energy_left.set_data(idata, ichan, ps, 0);
+                ui_element->energy_right.set_data(idata, ichan, ps, 1);
+                break;
+            case 2:
+                ui_element->freq_left.set_data(idata, ichan, ps, 0);
+                ui_element->freq_right.set_data(idata, ichan, ps, 1);
+                break;
+
+            default:
+                break;
+            }
             ui_element->info = decoders.at(s->first)->statistic_info();
         }
     }
@@ -499,38 +500,37 @@ int main(int argc, char **argv)
 {
     start_audio_service();
     {
-        UiElement ui_element{DEBUG_TOOL_FRESH_INTERV};
+        UiElement ui_element{0, DEBUG_TOOL_FRESH_INTERV};
         auto ob = std::make_shared<Observer>(&ui_element, DEBUG_TOOL_FRESH_INTERV);
         if (!ob->start())
         {
             return 0;
         }
 
-        auto screen = ftxui::ScreenInteractive::Fullscreen();
+        auto screen = ftxui::ScreenInteractive::TerminalOutput();
         screen.SetCursor(ftxui::Screen::Cursor{0});
 
-        int tab_selected = 0;
         std::vector<std::string> tab_values{"WAVE", "ENERGY", "FREQUENCY"};
-        auto tab_toggle = ftxui::Toggle(&tab_values, &tab_selected);
+        auto tab_toggle = ftxui::Toggle(&tab_values, &ui_element.selected);
         auto tab1 = ftxui::Renderer(
-            [&ui_element, tab_selected]()
+            [&ui_element]()
             {
-                return tab_selected == 0 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
+                return ui_element.selected == 0 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
             });
         auto tab2 = ftxui::Renderer(
-            [&ui_element, &tab_selected]()
+            [&ui_element]()
             {
-                return tab_selected == 1 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
+                return ui_element.selected == 1 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
             });
         auto tab3 = ftxui::Renderer(
-            [&ui_element, &tab_selected]()
+            [&ui_element]()
             {
-                return tab_selected == 2 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.freq_left, ui_element.freq_right, enum2val(DEBUG_TOOL_SAMPLE_RATE) / 2000) : ftxui::text("");
+                return ui_element.selected == 2 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.freq_left, ui_element.freq_right, enum2val(DEBUG_TOOL_SAMPLE_RATE) / 2000) : ftxui::text("");
             });
 
         auto tab_container = ftxui::Container::Tab(
             {tab1, tab2, tab3},
-            &tab_selected);
+            &ui_element.selected);
         auto container = ftxui::Container::Vertical({
             tab_toggle,
             tab_container,

@@ -3,6 +3,7 @@
 
 #include "audio_stream.h"
 #include "audio_network.h"
+#include "kiss_fft.h"
 #include <deque>
 
 class WaveGraph
@@ -56,7 +57,7 @@ private:
 
 struct UiElement
 {
-    UiElement(AudioPeriodSize ps) : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps) {}
+    UiElement(int tab_selected, AudioPeriodSize ps) : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps), selected(tab_selected) {}
     ChannelInfo info;
     WaveGraph wave_left;
     WaveGraph wave_right;
@@ -64,6 +65,7 @@ struct UiElement
     EnergyGraph energy_right;
     FreqGraph freq_left;
     FreqGraph freq_right;
+    int selected;
 };
 
 class Observer : public std::enable_shared_from_this<Observer>
