@@ -380,8 +380,18 @@ void Observer::fresh_graph()
         {
             auto ichan = s->second->chan;
             auto idata = (const int16_t *)s->second->out_buf;
-            s->second->load_data(ps * ichan * sizeof(int16_t));
+            auto isize = ps * ichan * sizeof(int16_t);
+            s->second->load_data(isize);
             std::lock_guard<std::mutex> grd2(fresh_mtx);
+            if (ui_element->recorded)
+            {
+                if (!ofs.is_open())
+                {
+                    ofs.open("48000hz_" + std::to_string(ichan) + "ch.pcm", std::ios_base::binary);
+                }
+                ofs.write(reinterpret_cast<const char *>(idata), isize);
+            }
+
             switch (ui_element->selected)
             {
             case 0:
@@ -605,7 +615,7 @@ static ftxui::Element construct_graph(int height, int width, CespGraph &usr_grap
     return vbox({lwin, xtitle, rwin});
 }
 
-static ftxui::Element construct_infos(const ChannelInfo &sta_info)
+static ftxui::Element construct_infos(const ChannelInfo &sta_info, const ftxui::Element &holder)
 {
     using namespace ftxui;
     Elements content;
@@ -619,10 +629,9 @@ static ftxui::Element construct_infos(const ChannelInfo &sta_info)
     sprintf(tmp, "Lost :%7.3f%% ", sta_info.lost_rate);
     content.push_back(text(tmp) | hcenter);
 
-    return vbox({
-        window(text("FPS") | hcenter | bold, text(std::to_string(fps_count())) | hcenter),
-        window(text("Statistics No." + std::to_string((unsigned int)sta_info.token)) | hcenter | bold, vbox(std::move(content))),
-    });
+    return vbox({window(text("FPS") | hcenter | bold, text(std::to_string(fps_count())) | hcenter),
+                 window(text("Statistics No." + std::to_string((unsigned int)sta_info.token)) | hcenter | bold, vbox(std::move(content))),
+                 window(text("Control") | hcenter | bold, holder)});
 }
 
 int main(int argc, char **argv)
@@ -665,12 +674,15 @@ int main(int argc, char **argv)
         auto tab_container = ftxui::Container::Tab(
             {tab1, tab2, tab3, tab4},
             &ui_element.selected);
-        auto container = ftxui::Container::Vertical({
+        auto container0 = ftxui::Container::Vertical({
             tab_toggle,
             tab_container,
         });
 
-        auto renderer = ftxui::Renderer(container, [&tab_toggle, &tab_container, &ui_element]
+        auto chk_box = ftxui::Checkbox("Record", &ui_element.recorded);
+        auto container1 = ftxui::Container::Horizontal({container0, chk_box});
+
+        auto renderer = ftxui::Renderer(container1, [&tab_toggle, &tab_container, &chk_box, &ui_element]
                                         {
             std::lock_guard<std::mutex> grd(fresh_mtx);
             auto tbc = ftxui::vbox({
@@ -678,7 +690,7 @@ int main(int argc, char **argv)
                 ftxui::separator(),
                 tab_container->Render(),
             });
-            auto text_box = construct_infos(ui_element.info);
+            auto text_box = construct_infos(ui_element.info, chk_box->Render());
             auto document = ftxui::window(ftxui::text("Audio Debug Tool " + std::string(__DATE__)) | ftxui::hcenter | ftxui::bold, ftxui::hbox({std::move(tbc) | ftxui::flex, ftxui::separator(), text_box}));
             document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 60);
             return document; });

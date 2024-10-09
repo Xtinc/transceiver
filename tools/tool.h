@@ -5,6 +5,7 @@
 #include "audio_network.h"
 #include "kiss_fft.h"
 #include <deque>
+#include <fstream>
 
 class WaveGraph
 {
@@ -75,7 +76,7 @@ private:
 struct UiElement
 {
     UiElement(int tab_selected, AudioPeriodSize ps)
-        : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps), cesp_left(ps), cesp_right(ps), selected(tab_selected) {}
+        : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps), cesp_left(ps), cesp_right(ps), selected(tab_selected), recorded(false) {}
     ChannelInfo info;
     WaveGraph wave_left;
     WaveGraph wave_right;
@@ -86,6 +87,7 @@ struct UiElement
     CespGraph cesp_left;
     CespGraph cesp_right;
     int selected;
+    bool recorded;
 };
 
 class Observer : public std::enable_shared_from_this<Observer>
@@ -122,6 +124,7 @@ private:
     usocket_ptr sock;
     char *recv_buf;
     std::atomic_bool oas_ready;
+    std::ofstream ofs;
 };
 
 #endif

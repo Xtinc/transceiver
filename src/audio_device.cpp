@@ -101,7 +101,15 @@ void AudioService::start()
     for (std::size_t i = 0; i < 2; ++i)
     {
         io_thds.emplace_back([this]()
-                             { io_ctx.run(); });
+                             {
+#ifdef __linux__
+                                pthread_t thread=pthread_self();
+                                struct sched_param param;
+                                param.sched_priority = 10;
+                                pthread_setschedparam(thread, SCHED_RR, &param);
+                                pthread_setname_np(thread, "audio_thrdpool");
+#endif
+                                io_ctx.run(); });
     }
 }
 
