@@ -257,7 +257,7 @@ bool WaveIADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     max_chan = chan = ifs.channel_number();
     if (fs != ifs.sample_rate())
     {
-        AUDIO_INFO_PRINT("require fs %d, resample from %lu\n", fs, ifs.sample_rate());
+        AUDIO_INFO_PRINT("require fs %d, resample from %u\n", fs, ifs.sample_rate());
         iastream->set_resampler_parameter((int)ifs.sample_rate(), fs, chan);
     }
     auto max_pickup_size = std::max(ps, ceil_div(ps * ifs.sample_rate(), fs));
