@@ -36,12 +36,13 @@ constexpr typename std::underlying_type<T>::type enum2val(T e)
 {
     return static_cast<typename std::underlying_type<T>::type>(e);
 }
-constexpr int ceil_div(int a, int b)
+
+inline constexpr int ceil_div(int a, int b)
 {
     return (a + b - 1) / b;
 }
 
-constexpr uint8_t cast_bandwidth_as_uint8(AudioBandWidth bandwidth)
+inline constexpr uint8_t cast_bandwidth_as_uint8(AudioBandWidth bandwidth)
 {
     uint8_t result = 0;
     switch (bandwidth)
@@ -64,7 +65,7 @@ constexpr uint8_t cast_bandwidth_as_uint8(AudioBandWidth bandwidth)
     return result;
 }
 
-constexpr AudioBandWidth cast_uint8_as_bandwidth(uint8_t sample_rate)
+inline constexpr AudioBandWidth cast_uint8_as_bandwidth(uint8_t sample_rate)
 {
     switch (sample_rate)
     {
@@ -79,6 +80,11 @@ constexpr AudioBandWidth cast_uint8_as_bandwidth(uint8_t sample_rate)
     default:
         return AudioBandWidth::Unknown;
     }
+}
+
+inline float HanningWindows(int idx, int length)
+{
+    return 0.54f - 0.46f * std::cos(2.f * 3.1415927f * idx / (length - 1));
 }
 
 struct ChannelInfo

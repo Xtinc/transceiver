@@ -21,11 +21,6 @@ static constexpr auto MAXIMUM_TRANSMISSION_SIZE = 1024 * 6;
 static constexpr int GRAPH_WINDOWS_SIZE[2] = {21, 60};
 static std::mutex fresh_mtx;
 
-inline float HanningWindows(int idx, int length)
-{
-    return 0.54f - 0.46f * std::cos(2.f * 3.1415927f * idx / length);
-}
-
 WaveGraph::WaveGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
 {
     data = new int16_t[length];
@@ -153,12 +148,12 @@ std::vector<int> FreqGraph::operator()(int width, int height)
         auto sum = 0.0f;
         for (size_t j = last_idx; j < data_idx; j++)
         {
-            sum += std::sqrt(cxo[j].r * cxo[j].r + cxo[j].i * cxo[j].i);
+            sum += cxo[j].r * cxo[j].r + cxo[j].i * cxo[j].i;
         }
         sum *= 2.0f / ((data_idx - last_idx) * length);
 
         auto amp = sum > 0.0f ? sum : 32767e-4;
-        auto db = 20.0f * std::log10(sum / 32767) + 80.0f;
+        auto db = 10.0f * std::log10(sum / 32767) + 80.0f;
         auto val = (int)(db * height / 80.0f);
         result.emplace_back(val);
         last_idx = data_idx;
@@ -177,7 +172,7 @@ void FreqGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     {
         for (int i = 0; i < frames_num; i++)
         {
-            cxi[i].r = ssrc[i] * HanningWindows(i, frames_num);
+            cxi[i].r = ssrc[i] * HanningWindows(frames_num - i - 1, frames_num);
             cxi[i].i = 0;
         }
     }
@@ -185,7 +180,7 @@ void FreqGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     {
         for (int i = 0; i < frames_num; i++)
         {
-            cxi[i].r = ssrc[2 * i + chan_idx] * HanningWindows(i, frames_num);
+            cxi[i].r = ssrc[2 * i + chan_idx] * HanningWindows(frames_num - i - 1, frames_num);
             cxi[i].i = 0;
         }
     }
@@ -264,7 +259,7 @@ void CespGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     {
         for (int i = 0; i < frames_num; i++)
         {
-            cxi[i].r = ssrc[i] * HanningWindows(i, frames_num);
+            cxi[i].r = ssrc[i] * HanningWindows(frames_num - i - 1, frames_num);
             cxi[i].i = 0;
         }
     }
@@ -272,7 +267,7 @@ void CespGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     {
         for (int i = 0; i < frames_num; i++)
         {
-            cxi[i].r = ssrc[2 * i + chan_idx] * HanningWindows(i, frames_num);
+            cxi[i].r = ssrc[2 * i + chan_idx] * HanningWindows(frames_num - i - 1, frames_num);
             cxi[i].i = 0;
         }
     }
