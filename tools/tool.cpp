@@ -90,6 +90,7 @@ std::vector<int> EnergyGraph::operator()(int width, int height)
         auto val = (int)(db * height / 40);
         result.emplace_back(val);
     }
+    xrange = width;
     return result;
 }
 
@@ -116,6 +117,11 @@ void EnergyGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, i
     }
     sum /= frames_num;
     data.push_back(sum);
+}
+
+int EnergyGraph::xaxis_range() const
+{
+    return xrange;
 }
 
 FreqGraph::FreqGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000), freq_len(length / 2 + 1)
@@ -148,12 +154,12 @@ std::vector<int> FreqGraph::operator()(int width, int height)
         auto sum = 0.0f;
         for (size_t j = last_idx; j < data_idx; j++)
         {
-            sum += cxo[j].r * cxo[j].r + cxo[j].i * cxo[j].i;
+            sum += std::sqrt(cxo[j].r * cxo[j].r + cxo[j].i * cxo[j].i);
         }
         sum *= 2.0f / ((data_idx - last_idx) * length);
 
         auto amp = sum > 0.0f ? sum : 32767e-4;
-        auto db = 10.0f * std::log10(sum / 32767) + 80.0f;
+        auto db = 20.0f * std::log10(sum / 32767) + 80.0f;
         auto val = (int)(db * height / 80.0f);
         result.emplace_back(val);
         last_idx = data_idx;
@@ -274,9 +280,9 @@ void CespGraph::set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int
     kiss_fft(fft_cfg1, cxi, cxo);
 }
 
-Observer::Observer(UiElement *element, AudioPeriodSize interval_ms)
+Observer::Observer(asio::io_context &io, UiElement *element, AudioPeriodSize interval_ms)
     : fresh_interv(enum2val(interval_ms)), fs(enum2val(DEBUG_TOOL_SAMPLE_RATE)), ps(fs * fresh_interv / 1000),
-      ui_element(element), timer(SERVICE), recv_buf(nullptr), oas_ready(false)
+      ui_element(element), ioc(io), timer(ioc), recv_buf(nullptr), oas_ready(false)
 {
     recv_buf = new char[MAXIMUM_TRANSMISSION_SIZE];
 }
@@ -298,7 +304,7 @@ bool Observer::start()
 
     try
     {
-        sock = std::make_unique<udp::socket>(SERVICE, udp::endpoint(udp::v4(), DEBUG_TOOL_PORT));
+        sock = std::make_unique<udp::socket>(ioc, udp::endpoint(udp::v4(), DEBUG_TOOL_PORT));
     }
     catch (const std::exception &e)
     {
@@ -306,9 +312,9 @@ bool Observer::start()
         return false;
     }
 
-    asio::post(SERVICE, [self = shared_from_this()]()
-               { self->do_receive();
-                self->fresh_graph(); });
+    asio::post(ioc, [this]()
+               { do_receive();
+                fresh_graph(); });
 
     return true;
 }
@@ -336,27 +342,27 @@ void Observer::do_receive()
     static udp::endpoint sender_endpoint;
     sock->async_receive_from(
         asio::buffer(recv_buf, MAXIMUM_TRANSMISSION_SIZE * 6), sender_endpoint,
-        [self = shared_from_this()](std::error_code ec, std::size_t bytes)
+        [this](std::error_code ec, std::size_t bytes)
         {
-            if (!ec && PacketHeader::validate(self->recv_buf, bytes))
+            if (!ec && PacketHeader::validate(recv_buf, bytes))
             {
-                auto sender = self->recv_buf[0];
-                auto chan = self->recv_buf[1];
-                std::lock_guard<std::mutex> grd(self->dest_mtx);
-                if (self->net_sessions.find(sender) == self->net_sessions.end())
+                auto sender = recv_buf[0];
+                auto chan = recv_buf[1];
+                std::lock_guard<std::mutex> grd(dest_mtx);
+                if (net_sessions.find(sender) == net_sessions.end())
                 {
-                    self->decoders.insert({sender, std::make_unique<NetDecoder>(sender, chan, self->fs)});
-                    self->net_sessions.insert(
-                        {sender, std::make_unique<SessionData>(self->ps * chan * sizeof(int16_t), 18, chan)});
+                    decoders.insert({sender, std::make_unique<NetDecoder>(sender, chan, fs)});
+                    net_sessions.insert(
+                        {sender, std::make_unique<SessionData>(ps * chan * sizeof(int16_t), 18, chan)});
                 }
                 const char *decode_data = nullptr;
                 size_t decode_length = 0;
-                if (self->decoders.at(sender)->commit(self->recv_buf, bytes, decode_data, decode_length))
+                if (decoders.at(sender)->commit(recv_buf, bytes, decode_data, decode_length))
                 {
-                    self->net_sessions.at(sender)->store_data(decode_data, decode_length);
+                    net_sessions.at(sender)->store_data(decode_data, decode_length);
                 }
             }
-            self->do_receive();
+            do_receive();
         });
 }
 
@@ -419,13 +425,13 @@ void Observer::fresh_graph()
     }
 
     timer.expires_at(now + asio::chrono::milliseconds(fresh_interv));
-    timer.async_wait([self = shared_from_this()](const asio::error_code &ec)
+    timer.async_wait([this](const asio::error_code &ec)
                      {
         if (ec)
         {
             return;
         }
-        self->fresh_graph(); });
+        fresh_graph(); });
 }
 
 static int fps_count()
@@ -502,11 +508,30 @@ static ftxui::Element construct_graph(int height, int width, EnergyGraph &usr_gr
                     filler(),
                     text("-40 ")}),
               graph(std::ref(usr_graph1)) | flex | color(Color::BlueLight)});
+    auto xaxis_max = usr_graph0.xaxis_range() * enum2val(DEBUG_TOOL_FRESH_INTERV);
+    auto xtitle = hbox({text("ms   "),
+                        text(std::to_string(xaxis_max)),
+                        filler(),
+                        text(std::to_string(7 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(3 * xaxis_max / 4)),
+                        filler(),
+                        text(std::to_string(5 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 2)),
+                        filler(),
+                        text(std::to_string(3 * xaxis_max / 8)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 4)),
+                        filler(),
+                        text(std::to_string(xaxis_max / 8)),
+                        filler(),
+                        text("0")});
     lwin |= size(HEIGHT, GREATER_THAN, height);
     lwin |= size(WIDTH, GREATER_THAN, width);
     rwin |= size(HEIGHT, GREATER_THAN, height);
     rwin |= size(WIDTH, GREATER_THAN, width);
-    return vbox({lwin, separator(), rwin});
+    return vbox({lwin, xtitle, rwin});
 }
 
 static ftxui::Element construct_graph(int height, int width, FreqGraph &usr_graph0, FreqGraph &usr_graph1, int xaxis_max)
@@ -631,13 +656,16 @@ static ftxui::Element construct_infos(const ChannelInfo &sta_info, const ftxui::
 
 int main(int argc, char **argv)
 {
-    start_audio_service();
+    asio::io_context ioc;
+    asio::executor_work_guard<asio::io_context::executor_type> work_guard(ioc.get_executor());
+    std::thread thd([&ioc]()
+                    { ioc.run(); });
     {
         UiElement ui_element{0, DEBUG_TOOL_FRESH_INTERV};
-        auto ob = std::make_shared<Observer>(&ui_element, DEBUG_TOOL_FRESH_INTERV);
-        if (!ob->start())
+        Observer ob(ioc, &ui_element, DEBUG_TOOL_FRESH_INTERV);
+        if (!ob.start())
         {
-            return 0;
+            return EXIT_SUCCESS;
         }
 
         auto screen = ftxui::ScreenInteractive::TerminalOutput();
@@ -690,10 +718,10 @@ int main(int argc, char **argv)
             document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 60);
             return document; });
 
-        ob->set_callback([&screen]()
-                         { screen.Post(ftxui::Event::Custom); });
+        ob.set_callback([&screen]()
+                        { screen.Post(ftxui::Event::Custom); });
         screen.Loop(renderer);
     }
-    stop_audio_service();
-    return 0;
+    thd.join();
+    return EXIT_SUCCESS;
 }

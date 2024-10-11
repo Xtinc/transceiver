@@ -31,8 +31,11 @@ public:
 
     void set_data(const int16_t *ssrc, int ssrc_chan, int frames_num, int chan_idx);
 
+    int xaxis_range() const;
+
 private:
     int length;
+    int xrange;
     std::deque<double> data;
 };
 
@@ -90,12 +93,12 @@ struct UiElement
     bool recorded;
 };
 
-class Observer : public std::enable_shared_from_this<Observer>
+class Observer
 {
 public:
     using fresh_cb = std::function<void()>;
 
-    Observer(UiElement *element, AudioPeriodSize interval_ms);
+    Observer(asio::io_context &io, UiElement *element, AudioPeriodSize interval_ms);
     ~Observer();
 
     bool start();
@@ -120,6 +123,7 @@ private:
 
     UiElement *ui_element;
     std::mutex dest_mtx;
+    asio::io_context &ioc;
     asio::steady_timer timer;
     usocket_ptr sock;
     char *recv_buf;
