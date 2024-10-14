@@ -78,8 +78,8 @@ private:
 
 struct UiElement
 {
-    UiElement(int tab_selected, AudioPeriodSize ps)
-        : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps), cesp_left(ps), cesp_right(ps), selected(tab_selected), recorded(false) {}
+    UiElement(int tab, AudioPeriodSize ps)
+        : info{}, wave_left(ps), wave_right(ps), energy_left(ps), energy_right(ps), freq_left(ps), freq_right(ps), cesp_left(ps), cesp_right(ps), tab_selected(tab), chn_selected(0), recorded(false) {}
     ChannelInfo info;
     WaveGraph wave_left;
     WaveGraph wave_right;
@@ -89,8 +89,10 @@ struct UiElement
     FreqGraph freq_right;
     CespGraph cesp_left;
     CespGraph cesp_right;
-    int selected;
+    int tab_selected;
+    int chn_selected;
     bool recorded;
+    std::vector<std::string> chlist{"null"};
 };
 
 class Observer

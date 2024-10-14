@@ -1,7 +1,6 @@
 #include "audio_device.h"
 #include "audio_network.h"
 #include "audio_stream.h"
-#include "audio_mixer.h"
 #include "portaudio.h"
 #include <cmath>
 
@@ -225,11 +224,6 @@ bool PhsyIADevice::stop()
 
 void PhsyIADevice::transfer_pcm_data(int16_t *input, int frame_number)
 {
-    if (fit_sliences(input, stream->chan_num, frame_number))
-    {
-        return;
-    }
-
     if (stream->sampler)
     {
         int16_t *out = input;
@@ -420,11 +414,6 @@ bool MultiIADevice::stop()
 
 void MultiIADevice::transfer_pcm_data(int16_t *input, int frame_number)
 {
-    if (fit_sliences(input, stream->chan_num, frame_number))
-    {
-        return;
-    }
-
     stream->read_raw_frames(input, frame_number);
     auto dst = pick_ups;
     for (size_t i = 0; i < frame_number; i++)

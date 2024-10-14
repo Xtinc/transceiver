@@ -17,7 +17,6 @@ static constexpr unsigned short DEBUG_TOOL_PORT = (uint16_t)(0xccu << 8) + (uint
 static constexpr auto DEBUG_TOOL_SAMPLE_RATE = AudioBandWidth::Full;
 static constexpr auto DEBUG_TOOL_FRESH_INTERV = AudioPeriodSize::INR_40MS;
 static constexpr auto MAXIMUM_TRANSMISSION_SIZE = 1024 * 6;
-
 static constexpr int GRAPH_WINDOWS_SIZE[2] = {21, 60};
 static std::mutex fresh_mtx;
 
@@ -376,46 +375,55 @@ void Observer::fresh_graph()
 
     {
         std::lock_guard<std::mutex> grd(dest_mtx);
-        auto s = net_sessions.begin();
-        if (s != net_sessions.end())
+        ui_element->chlist = {"null"};
+        for (const auto &e : net_sessions)
         {
-            auto ichan = s->second->chan;
-            auto idata = (const int16_t *)s->second->out_buf;
-            auto isize = ps * ichan * sizeof(int16_t);
-            s->second->load_data(isize);
-            std::lock_guard<std::mutex> grd2(fresh_mtx);
-            if (ui_element->recorded)
+            ui_element->chlist.push_back(std::to_string(e.first));
+        }
+        auto key = ui_element->chlist.at(ui_element->chn_selected);
+        if (key != "null")
+        {
+            auto s = net_sessions.find(std::stoi(key));
+            if (s != net_sessions.end())
             {
-                if (!ofs.is_open())
+                auto ichan = s->second->chan;
+                auto idata = (const int16_t *)s->second->out_buf;
+                auto isize = ps * ichan * sizeof(int16_t);
+                s->second->load_data(isize);
+                std::lock_guard<std::mutex> grd2(fresh_mtx);
+                if (ui_element->recorded)
                 {
-                    ofs.open("48000hz_" + std::to_string(ichan) + "ch.pcm", std::ios_base::binary);
+                    if (!ofs.is_open())
+                    {
+                        ofs.open("48000hz_" + std::to_string(ichan) + "ch.pcm", std::ios_base::binary);
+                    }
+                    ofs.write(reinterpret_cast<const char *>(idata), isize);
                 }
-                ofs.write(reinterpret_cast<const char *>(idata), isize);
-            }
 
-            switch (ui_element->selected)
-            {
-            case 0:
-                ui_element->wave_left.set_data(idata, ichan, ps, 0);
-                ui_element->wave_right.set_data(idata, ichan, ps, 1);
-                break;
-            case 1:
-                ui_element->energy_left.set_data(idata, ichan, ps, 0);
-                ui_element->energy_right.set_data(idata, ichan, ps, 1);
-                break;
-            case 2:
-                ui_element->freq_left.set_data(idata, ichan, ps, 0);
-                ui_element->freq_right.set_data(idata, ichan, ps, 1);
-                break;
-            case 3:
-                ui_element->cesp_left.set_data(idata, ichan, ps, 0);
-                ui_element->cesp_right.set_data(idata, ichan, ps, 1);
-                break;
+                switch (ui_element->tab_selected)
+                {
+                case 0:
+                    ui_element->wave_left.set_data(idata, ichan, ps, 0);
+                    ui_element->wave_right.set_data(idata, ichan, ps, 1);
+                    break;
+                case 1:
+                    ui_element->energy_left.set_data(idata, ichan, ps, 0);
+                    ui_element->energy_right.set_data(idata, ichan, ps, 1);
+                    break;
+                case 2:
+                    ui_element->freq_left.set_data(idata, ichan, ps, 0);
+                    ui_element->freq_right.set_data(idata, ichan, ps, 1);
+                    break;
+                case 3:
+                    ui_element->cesp_left.set_data(idata, ichan, ps, 0);
+                    ui_element->cesp_right.set_data(idata, ichan, ps, 1);
+                    break;
 
-            default:
-                break;
+                default:
+                    break;
+                }
+                ui_element->info = decoders.at(s->first)->statistic_info();
             }
-            ui_element->info = decoders.at(s->first)->statistic_info();
         }
     }
 
@@ -635,7 +643,7 @@ static ftxui::Element construct_graph(int height, int width, CespGraph &usr_grap
     return vbox({lwin, xtitle, rwin});
 }
 
-static ftxui::Element construct_infos(const ChannelInfo &sta_info, const ftxui::Element &holder)
+static ftxui::Element construct_infos(const ChannelInfo &sta_info, const ftxui::Element &holder1, const ftxui::Element &holder2)
 {
     using namespace ftxui;
     Elements content;
@@ -651,7 +659,7 @@ static ftxui::Element construct_infos(const ChannelInfo &sta_info, const ftxui::
 
     return vbox({window(text("FPS") | hcenter | bold, text(std::to_string(fps_count())) | hcenter),
                  window(text("Statistics No." + std::to_string((unsigned int)sta_info.token)) | hcenter | bold, vbox(std::move(content))),
-                 window(text("Control") | hcenter | bold, holder)});
+                 window(text("Control") | hcenter | bold, vbox(holder1, separator(), holder2))});
 }
 
 int main(int argc, char **argv)
@@ -672,40 +680,42 @@ int main(int argc, char **argv)
         screen.SetCursor(ftxui::Screen::Cursor{0});
 
         std::vector<std::string> tab_values{"WAVE", "ENERGY", "STFT", "CESP"};
-        auto tab_toggle = ftxui::Toggle(&tab_values, &ui_element.selected);
+        auto tab_toggle = ftxui::Toggle(&tab_values, &ui_element.tab_selected);
         auto tab1 = ftxui::Renderer(
             [&ui_element]()
             {
-                return ui_element.selected == 0 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
+                return ui_element.tab_selected == 0 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.wave_left, ui_element.wave_right) : ftxui::text("");
             });
         auto tab2 = ftxui::Renderer(
             [&ui_element]()
             {
-                return ui_element.selected == 1 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
+                return ui_element.tab_selected == 1 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.energy_left, ui_element.energy_right) : ftxui::text("");
             });
         auto tab3 = ftxui::Renderer(
             [&ui_element]()
             {
-                return ui_element.selected == 2 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.freq_left, ui_element.freq_right, enum2val(DEBUG_TOOL_SAMPLE_RATE) / 2000) : ftxui::text("");
+                return ui_element.tab_selected == 2 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.freq_left, ui_element.freq_right, enum2val(DEBUG_TOOL_SAMPLE_RATE) / 2000) : ftxui::text("");
             });
         auto tab4 = ftxui::Renderer(
             [&ui_element]()
             {
-                return ui_element.selected == 3 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.cesp_left, ui_element.cesp_right, enum2val(DEBUG_TOOL_FRESH_INTERV)) : ftxui::text("");
+                return ui_element.tab_selected == 3 ? construct_graph(GRAPH_WINDOWS_SIZE[0], GRAPH_WINDOWS_SIZE[1], ui_element.cesp_left, ui_element.cesp_right, enum2val(DEBUG_TOOL_FRESH_INTERV)) : ftxui::text("");
             });
 
         auto tab_container = ftxui::Container::Tab(
             {tab1, tab2, tab3, tab4},
-            &ui_element.selected);
+            &ui_element.tab_selected);
         auto container0 = ftxui::Container::Vertical({
             tab_toggle,
             tab_container,
         });
 
         auto chk_box = ftxui::Checkbox("Record", &ui_element.recorded);
-        auto container1 = ftxui::Container::Horizontal({container0, chk_box});
+        auto chn_box = ftxui::Radiobox(&ui_element.chlist, &ui_element.chn_selected);
+        auto container1 = ftxui::Container::Vertical({chk_box, chn_box});
+        auto container2 = ftxui::Container::Horizontal({container0, container1});
 
-        auto renderer = ftxui::Renderer(container1, [&tab_toggle, &tab_container, &chk_box, &ui_element]
+        auto renderer = ftxui::Renderer(container2, [&tab_toggle, &tab_container, &chk_box, &chn_box, &ui_element]
                                         {
             std::lock_guard<std::mutex> grd(fresh_mtx);
             auto tbc = ftxui::vbox({
@@ -713,7 +723,7 @@ int main(int argc, char **argv)
                 ftxui::separator(),
                 tab_container->Render(),
             });
-            auto text_box = construct_infos(ui_element.info, chk_box->Render());
+            auto text_box = construct_infos(ui_element.info, chk_box->Render(), chn_box->Render());
             auto document = ftxui::window(ftxui::text("Audio Debug Tool " + std::string(__DATE__)) | ftxui::hcenter | ftxui::bold, ftxui::hbox({std::move(tbc) | ftxui::flex, ftxui::separator(), text_box}));
             document |= ftxui::size(ftxui::HEIGHT, ftxui::LESS_THAN, 60);
             return document; });
