@@ -86,6 +86,10 @@ void SessionData::load_data(size_t len)
     {
         is.read(out_buf, static_cast<std::streamsize>(len));
     }
+    if (buf.size() > max_len)
+    {
+        buf.consume(max_len);
+    }
 }
 
 NetEncoder::NetEncoder(uint8_t _sender, uint8_t _channel, int _period, AudioBandWidth _bandwidth)

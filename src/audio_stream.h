@@ -104,7 +104,7 @@ class IAStreamImpl : public std::enable_shared_from_this<IAStreamImpl>
 
 public:
   IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period, const std::string &_hw_name,
-               bool _enable_network);
+               bool _enable_network, bool _enable_reset);
   ~IAStreamImpl();
 
   bool start();
@@ -124,6 +124,8 @@ public:
   void set_destory_callback(std::function<void()> &&_cb);
 
 private:
+  void reset_phsy_device();
+
   void set_resampler_parameter(int fsi, int fso, int chan);
 
   void read_raw_frames(const int16_t *input, int frame_number);
@@ -137,6 +139,7 @@ private:
 private:
   const unsigned char token;
   const bool enable_network;
+  const std::string hw_name;
   int fs;
   int ps;
   int chan_num;
@@ -181,7 +184,7 @@ private:
       return false;
     }
     auto audio_sender = std::make_shared<IAStreamImpl>(token + preemptive, AudioBandWidth::Full,
-                                                       AudioPeriodSize::INR_20MS, name, false);
+                                                       AudioPeriodSize::INR_20MS, name, false, false);
     audio_sender->set_destory_callback([this, name]()
                                        {
             preemptive--;

@@ -63,7 +63,7 @@ class IAStream
 public:
   IAStream(unsigned char _token, const std::string &_hw_name = "default_input",
            AudioBandWidth _bandwidth = AudioBandWidth::Full, AudioPeriodSize _period = AudioPeriodSize::INR_10MS,
-           bool _enable_network = true);
+           bool _enable_network = false, bool _enable_auto_reset = false);
   ~IAStream();
 
   bool start();

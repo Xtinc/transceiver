@@ -7,7 +7,8 @@
 using udp = asio::ip::udp;
 #define SERVICE (AudioService::GetService().executor())
 
-static constexpr auto PCM_CUSTOM_PERIOD_SIZE = 1024;
+static constexpr auto PHSY_DEVICE_RESRT_INTERVAL = std::chrono::seconds(10);
+static constexpr auto PCM_CUSTOM_PERIOD_SIZE = 480;
 static constexpr auto PCM_CUSTOM_SAMPLE_INRV = PCM_CUSTOM_PERIOD_SIZE * 1000 * 1000 / 48000;
 
 inline constexpr uint16_t token2port(unsigned char token)
@@ -255,14 +256,14 @@ void OAStreamImpl::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int 
 
 // IAStream
 IAStream::IAStream(unsigned char _token, const std::string &_hw_name, AudioBandWidth _bandwidth,
-                   AudioPeriodSize _period, bool _enable_network)
+                   AudioPeriodSize _period, bool _enable_network, bool _enable_reset)
 {
     if (_bandwidth == AudioBandWidth::Unknown)
     {
         AUDIO_ERROR_PRINT("Sample rate unknown is not allowed for input stream.\n");
         _bandwidth = AudioBandWidth::Full;
     }
-    impl = std::make_shared<IAStreamImpl>(_token, _bandwidth, _period, _hw_name, _enable_network);
+    impl = std::make_shared<IAStreamImpl>(_token, _bandwidth, _period, _hw_name, _enable_network, _enable_reset);
 }
 
 IAStream::~IAStream() = default;
@@ -303,10 +304,10 @@ void IAStream::set_callback(AudioInputCallBack _cb, void *_user_data)
 }
 
 IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period,
-                           const std::string &_hw_name, bool _enable_network)
-    : token(_token), enable_network(_enable_network), fs(enum2val(_bandwidth)), ps(fs / 1000 * (enum2val(_period))),
-      chan_num(0), max_chan(0), muted(false), timer0(SERVICE), timer1(SERVICE), user_cb(nullptr), usr_data(nullptr),
-      ias_ready(false)
+                           const std::string &_hw_name, bool _enable_network, bool _enable_reset)
+    : token(_token), enable_network(_enable_network), hw_name(_hw_name), fs(enum2val(_bandwidth)),
+      ps(fs / 1000 * (enum2val(_period))), chan_num(0), max_chan(0), muted(false), timer0(SERVICE),
+      timer1(SERVICE), user_cb(nullptr), usr_data(nullptr), ias_ready(false)
 {
     if (_hw_name.find(".wav") != std::string::npos)
     {
@@ -331,6 +332,11 @@ IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, Audi
     {
         encoder = std::make_unique<NetEncoder>(token, chan_num, ps, _bandwidth);
     }
+
+    if (_enable_reset)
+    {
+        reset_phsy_device();
+    }
 }
 
 IAStreamImpl::~IAStreamImpl()
@@ -346,6 +352,7 @@ bool IAStreamImpl::start()
 {
     if (ias_ready)
     {
+        AUDIO_INFO_PRINT("iastream :%u already start\n", token);
         return true;
     }
 
@@ -389,6 +396,7 @@ void IAStreamImpl::stop()
 {
     if (!ias_ready)
     {
+        AUDIO_INFO_PRINT("iastream :%u already stopped.\n", token);
         return;
     }
 
@@ -436,6 +444,31 @@ void IAStreamImpl::set_callback(AudioInputCallBack _cb, void *_user_data)
 void IAStreamImpl::set_destory_callback(std::function<void()> &&_cb)
 {
     dtor_cb = _cb;
+}
+
+void IAStreamImpl::reset_phsy_device()
+{
+    auto ttimer = std::make_shared<asio::steady_timer>(SERVICE);
+    ttimer->expires_from_now(PHSY_DEVICE_RESRT_INTERVAL);
+    ttimer->async_wait([this, ttimer](asio::error_code ec)
+                       {
+    if (ec)
+    {
+        return;
+    }
+    if (!dynamic_cast<PhsyIADevice *>(&(*idevice)))
+    {
+        return;
+    }
+    if (idevice->stop())
+    {
+        idevice.reset(new PhsyIADevice);
+        if (idevice->create(hw_name, this, fs, ps, chan_num, max_chan))
+        {
+            idevice->start();
+        }
+    }
+    reset_phsy_device(); });
 }
 
 void IAStreamImpl::set_resampler_parameter(int fsi, int fso, int chan)

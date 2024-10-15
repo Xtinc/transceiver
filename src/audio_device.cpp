@@ -43,7 +43,6 @@ namespace
             for (int i = 0; i < dev_num; i++)
             {
                 std::string dev_name = Pa_GetDeviceInfo(i)->name;
-                AUDIO_INFO_PRINT("search snd card:%s\n", dev_name.c_str());
                 if (dev_name.find(card_name) != std::string::npos)
                 {
                     if (sub_card_name.empty())
