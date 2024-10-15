@@ -82,11 +82,6 @@ inline constexpr AudioBandWidth cast_uint8_as_bandwidth(uint8_t sample_rate)
     }
 }
 
-inline float HanningWindows(int idx, int length)
-{
-    return 0.54f - 0.46f * std::cos(2.f * 3.1415927f * idx / (length - 1));
-}
-
 struct ChannelInfo
 {
     uint8_t token;

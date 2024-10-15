@@ -20,6 +20,11 @@ static constexpr auto MAXIMUM_TRANSMISSION_SIZE = 1024 * 6;
 static constexpr int GRAPH_WINDOWS_SIZE[2] = {21, 60};
 static std::mutex fresh_mtx;
 
+inline float HanningWindows(int idx, int length)
+{
+    return 0.54f - 0.46f * std::cos(2.f * 3.1415927f * idx / (length - 1));
+}
+
 WaveGraph::WaveGraph(AudioPeriodSize max_len) : length(enum2val(DEBUG_TOOL_SAMPLE_RATE) * enum2val(max_len) / 1000)
 {
     data = new int16_t[length];
