@@ -37,6 +37,12 @@ constexpr typename std::underlying_type<T>::type enum2val(T e)
     return static_cast<typename std::underlying_type<T>::type>(e);
 }
 
+template <typename E>
+constexpr E val2enum(typename std::underlying_type<E>::type val)
+{
+    return static_cast<E>(val);
+}
+
 inline constexpr int ceil_div(int a, int b)
 {
     return (a + b - 1) / b;

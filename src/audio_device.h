@@ -110,6 +110,26 @@ private:
   int16_t *pick_ups;
 };
 
+// OAStream Input Device
+class PipeIADevice final : public AudioDevice
+{
+public:
+  PipeIADevice(const std::shared_ptr<OAStreamImpl> &stream) : oas(stream), iastream(nullptr) {}
+  ~PipeIADevice() override;
+
+  bool create(const std::string &name, void *cls, int &fs, int &ps, int &chan, int &max_chan) override;
+
+  bool start() override;
+
+  bool stop() override;
+
+  void transfer_pcm_data(int16_t *input, int frame_number) override;
+
+private:
+  std::weak_ptr<OAStreamImpl> oas;
+  IAStreamImpl *iastream;
+};
+
 // Phys Output Device
 class PhsyOADevice final : public AudioDevice
 {

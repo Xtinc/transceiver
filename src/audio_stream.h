@@ -51,6 +51,7 @@ class OAStreamImpl : public std::enable_shared_from_this<OAStreamImpl>
   friend class PhsyOADevice;
   friend class WaveOADevice;
   friend class MultiOADevice;
+  friend class PipeIADevice;
 
 public:
   OAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period, const std::string &_hw_name,
@@ -61,10 +62,10 @@ public:
 
   void stop();
 
-  void connect(const std::shared_ptr<OAStreamImpl> &other);
-
   void direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                        const int16_t *data);
+
+  void set_callback(std::function<void(const int16_t *, int)> &&fn);
 
 private:
   void do_receive();
@@ -75,7 +76,7 @@ private:
 
 private:
   const unsigned char token;
-  const bool enable_network;
+  bool enable_network;
   int fs;
   int ps;
   int chan_num;
@@ -87,12 +88,11 @@ private:
   std::map<uint8_t, sampler_ptr> samplers;
   std::map<uint8_t, session_ptr> net_sessions;
   std::map<uint8_t, session_ptr> loc_sessions;
-  std::mutex dest_mtx;
-  loc_endpoints loc_dests;
-  net_endpoints net_dests;
   asio::steady_timer timer;
   usocket_ptr sock;
   char *recv_buf;
+  std::mutex delv_mtx;
+  std::function<void(const int16_t *, int)> delv_cb;
   std::atomic_bool oas_ready;
 };
 
@@ -101,10 +101,12 @@ class IAStreamImpl : public std::enable_shared_from_this<IAStreamImpl>
   friend class PhsyIADevice;
   friend class WaveIADevice;
   friend class MultiIADevice;
+  friend class PipeIADevice;
 
 public:
   IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period, const std::string &_hw_name,
                bool _enable_network, bool _enable_reset);
+  IAStreamImpl(unsigned char _token, const std::shared_ptr<OAStreamImpl> &oas, bool _enable_network, bool _enable_reset);
   ~IAStreamImpl();
 
   bool start();
@@ -138,7 +140,7 @@ private:
 
 private:
   const unsigned char token;
-  const bool enable_network;
+  bool enable_network;
   const std::string hw_name;
   int fs;
   int ps;

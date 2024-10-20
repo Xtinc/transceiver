@@ -7,7 +7,7 @@
 using udp = asio::ip::udp;
 #define SERVICE (AudioService::GetService().executor())
 
-static constexpr auto PHSY_DEVICE_RESRT_INTERVAL = std::chrono::seconds(10);
+static constexpr auto PHSY_DEVICE_RESRT_INTERVAL = std::chrono::minutes(30);
 static constexpr auto PCM_CUSTOM_PERIOD_SIZE = 480;
 static constexpr auto PCM_CUSTOM_SAMPLE_INRV = PCM_CUSTOM_PERIOD_SIZE * 1000 * 1000 / 48000;
 
@@ -44,17 +44,6 @@ bool OAStream::start()
 void OAStream::stop()
 {
     impl->stop();
-}
-
-void OAStream::connect(const OAStream &other)
-{
-    if (&other == this)
-    {
-        AUDIO_ERROR_PRINT("can not connect to self\n");
-        return;
-    }
-
-    return impl->connect(other.impl);
 }
 
 void OAStream::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
@@ -147,12 +136,6 @@ void OAStreamImpl::stop()
     AUDIO_INFO_PRINT("stop oastream\n");
 }
 
-void OAStreamImpl::connect(const std::shared_ptr<OAStreamImpl> &other)
-{
-    std::lock_guard<std::mutex> grd(dest_mtx);
-    loc_dests.emplace_back(other);
-}
-
 void OAStreamImpl::write_pcm_frames(int16_t *output, int frame_number)
 {
     std::memset(output, 0, chan_num * frame_number * sizeof(int16_t));
@@ -167,12 +150,11 @@ void OAStreamImpl::write_pcm_frames(int16_t *output, int frame_number)
         mix_channels((const int16_t *)s.second->out_buf, chan_num, s.second->chan, ps, (int16_t *)output);
     }
 
-    std::lock_guard<std::mutex> grd(dest_mtx);
-    for (const auto &dest : loc_dests)
     {
-        if (auto np = dest.lock())
+        std::lock_guard<std::mutex> grd(delv_mtx);
+        if (delv_cb)
         {
-            np->direct_push_pcm(token, chan_num, frame_number, fs, output);
+            delv_cb(output, frame_number);
         }
     }
 }
@@ -254,6 +236,12 @@ void OAStreamImpl::direct_push_pcm(uint8_t input_token, uint8_t input_chan, int 
     }
 }
 
+void OAStreamImpl::set_callback(std::function<void(const int16_t *, int)> &&fn)
+{
+    std::lock_guard<std::mutex> grd(delv_mtx);
+    delv_cb = fn;
+}
+
 // IAStream
 IAStream::IAStream(unsigned char _token, const std::string &_hw_name, AudioBandWidth _bandwidth,
                    AudioPeriodSize _period, bool _enable_network, bool _enable_reset)
@@ -264,6 +252,11 @@ IAStream::IAStream(unsigned char _token, const std::string &_hw_name, AudioBandW
         _bandwidth = AudioBandWidth::Full;
     }
     impl = std::make_shared<IAStreamImpl>(_token, _bandwidth, _period, _hw_name, _enable_network, _enable_reset);
+}
+
+IAStream::IAStream(unsigned char _token, const OAStream &oas, bool _enable_network, bool _enable_auto_reset)
+{
+    impl = std::make_shared<IAStreamImpl>(_token, oas.impl, _enable_network, _enable_auto_reset);
 }
 
 IAStream::~IAStream() = default;
@@ -336,6 +329,32 @@ IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, Audi
     if (_enable_reset)
     {
         reset_phsy_device();
+    }
+}
+
+IAStreamImpl::IAStreamImpl(unsigned char _token, const std::shared_ptr<OAStreamImpl> &oas, bool _enable_network, bool _enable_reset)
+    : token(_token), enable_network(_enable_network), hw_name(""), fs(enum2val(AudioBandWidth::Full)),
+      ps(fs / 1000 * (enum2val(AudioPeriodSize::INR_10MS))), chan_num(0), max_chan(0), muted(false), timer0(SERVICE),
+      timer1(SERVICE), user_cb(nullptr), usr_data(nullptr), ias_ready(false)
+{
+    idevice = std::make_unique<PipeIADevice>(oas);
+    if (idevice->create(hw_name, this, fs, ps, chan_num, max_chan))
+    {
+        // session for raw data
+        session = std::make_unique<SessionData>(PCM_CUSTOM_PERIOD_SIZE * max_chan * sizeof(int16_t), 2, max_chan);
+    }
+
+    if (enable_network)
+    {
+        if (fs % 8000)
+        {
+            AUDIO_ERROR_PRINT("Network transfer doesn't support audio sample rates that are not 8K series.");
+            enable_network = false;
+        }
+        else
+        {
+            encoder = std::make_unique<NetEncoder>(token, chan_num, ps, val2enum<AudioBandWidth>(fs));
+        }
     }
 }
 

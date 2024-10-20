@@ -317,6 +317,54 @@ bool WaveIADevice::enable_external_loop() const
     return true;
 }
 
+// Pipe Input Device
+PipeIADevice::~PipeIADevice()
+{
+    stop();
+}
+
+bool PipeIADevice::create(const std::string &, void *cls, int &fs, int &ps, int &chan, int &max_chan)
+{
+    if (auto np = oas.lock())
+    {
+        iastream = reinterpret_cast<IAStreamImpl *>(cls);
+        fs = np->fs;
+        ps = np->ps;
+        chan = np->chan_num;
+        max_chan = np->max_chan;
+        AUDIO_INFO_PRINT("open idevice: %u from oastream %u, ichan = %d, max_chan = %d, fs = %d, ps = %d\n", iastream->token, np->token, chan,
+                         max_chan, fs, ps);
+        ready = true;
+        return true;
+    }
+    return false;
+}
+
+bool PipeIADevice::start()
+{
+    if (auto np = oas.lock())
+    {
+        np->set_callback([this](const int16_t *in, int ps)
+                         { transfer_pcm_data(const_cast<int16_t *>(in), ps); });
+    }
+    return false;
+}
+
+bool PipeIADevice::stop()
+{
+    if (auto np = oas.lock())
+    {
+        np->set_callback({});
+    }
+    return false;
+}
+
+void PipeIADevice::transfer_pcm_data(int16_t *input, int frame_number)
+{
+    iastream->read_raw_frames(input, frame_number);
+    iastream->read_pcm_frames(input, frame_number);
+}
+
 // Phys Multi Input Device
 MultiIADevice::~MultiIADevice()
 {

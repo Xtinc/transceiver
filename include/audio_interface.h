@@ -49,8 +49,6 @@ public:
 
   void stop();
 
-  void connect(const OAStream &other);
-
   void direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
                        const int16_t *data);
 
@@ -64,6 +62,9 @@ public:
   IAStream(unsigned char _token, const std::string &_hw_name = "default_input",
            AudioBandWidth _bandwidth = AudioBandWidth::Full, AudioPeriodSize _period = AudioPeriodSize::INR_10MS,
            bool _enable_network = false, bool _enable_auto_reset = false);
+
+  IAStream(unsigned char _token, const OAStream &oas, bool _enable_network = false, bool _enable_auto_reset = false);
+
   ~IAStream();
 
   bool start();
