@@ -121,7 +121,7 @@ public:
 
   bool connect(const std::string &ip, uint16_t port);
 
-  void set_callback(AudioInputCallBack _cb, void *_user_data);
+  void set_callback(AudioInputCallBack _cb, int _ps, void *_user_data);
 
   void set_destory_callback(std::function<void()> &&_cb);
 
@@ -159,8 +159,9 @@ private:
   std::mutex dest_mtx;
   asio::steady_timer timer0;
   asio::steady_timer timer1;
-  AudioInputCallBack user_cb;
+  AudioInputCallBack usr_cb;
   void *usr_data;
+  int usr_ps;
   std::function<void()> dtor_cb;
   std::atomic_bool ias_ready;
 };

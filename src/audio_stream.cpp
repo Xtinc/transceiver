@@ -7,6 +7,11 @@
 using udp = asio::ip::udp;
 #define SERVICE (AudioService::GetService().executor())
 
+#ifdef __linux__
+static constexpr auto OS_CLK_OFFSET = 40;
+#else
+static constexpr auto OS_CLK_OFFSET = 400;
+#endif
 static constexpr auto PHSY_DEVICE_RESRT_INTERVAL = std::chrono::minutes(30);
 static constexpr auto PCM_CUSTOM_PERIOD_SIZE = 480;
 static constexpr auto PCM_CUSTOM_SAMPLE_INRV = PCM_CUSTOM_PERIOD_SIZE * 1000 * 1000 / 48000;
@@ -165,13 +170,12 @@ void OAStreamImpl::exec_external_loop()
     {
         return;
     }
-    auto now = std::chrono::steady_clock::now();
     auto interval = ceil_div(ps * 1000, fs);
     if (!odevice->async_task(interval))
     {
         return;
     }
-    timer.expires_at(now + asio::chrono::milliseconds(interval));
+    timer.expires_after(asio::chrono::microseconds(interval - OS_CLK_OFFSET));
     timer.async_wait([self = shared_from_this()](const asio::error_code &ec)
                      {
         if (ec)
@@ -291,16 +295,16 @@ bool IAStream::connect(const std::string &ip, unsigned char token)
     return impl->connect(ip, token2port(token));
 }
 
-void IAStream::set_callback(AudioInputCallBack _cb, void *_user_data)
+void IAStream::set_callback(AudioInputCallBack _cb, int _ps, void *_user_data)
 {
-    impl->set_callback(_cb, _user_data);
+    impl->set_callback(_cb, _ps, _user_data);
 }
 
 IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, AudioPeriodSize _period,
                            const std::string &_hw_name, bool _enable_network, bool _enable_reset)
     : token(_token), enable_network(_enable_network), hw_name(_hw_name), fs(enum2val(_bandwidth)),
       ps(fs / 1000 * (enum2val(_period))), chan_num(0), max_chan(0), muted(false), timer0(SERVICE),
-      timer1(SERVICE), user_cb(nullptr), usr_data(nullptr), ias_ready(false)
+      timer1(SERVICE), usr_cb(nullptr), usr_data(nullptr), ias_ready(false)
 {
     if (_hw_name.find(".wav") != std::string::npos)
     {
@@ -335,7 +339,7 @@ IAStreamImpl::IAStreamImpl(unsigned char _token, AudioBandWidth _bandwidth, Audi
 IAStreamImpl::IAStreamImpl(unsigned char _token, const std::shared_ptr<OAStreamImpl> &oas, bool _enable_network, bool _enable_reset)
     : token(_token), enable_network(_enable_network), hw_name(""), fs(enum2val(AudioBandWidth::Full)),
       ps(fs / 1000 * (enum2val(AudioPeriodSize::INR_10MS))), chan_num(0), max_chan(0), muted(false), timer0(SERVICE),
-      timer1(SERVICE), user_cb(nullptr), usr_data(nullptr), ias_ready(false)
+      timer1(SERVICE), usr_cb(nullptr), usr_data(nullptr), ias_ready(false)
 {
     idevice = std::make_unique<PipeIADevice>(oas);
     if (idevice->create(hw_name, this, fs, ps, chan_num, max_chan))
@@ -392,7 +396,7 @@ bool IAStreamImpl::start()
         exec_external_loop();
     }
 
-    if (user_cb)
+    if (usr_cb)
     {
         copy_pcm_frames();
     }
@@ -454,9 +458,10 @@ bool IAStreamImpl::connect(const std::string &ip, uint16_t port)
     return true;
 }
 
-void IAStreamImpl::set_callback(AudioInputCallBack _cb, void *_user_data)
+void IAStreamImpl::set_callback(AudioInputCallBack _cb, int _ps, void *_user_data)
 {
-    user_cb = _cb;
+    usr_cb = _cb;
+    usr_ps = _ps;
     usr_data = _user_data;
 }
 
@@ -497,7 +502,7 @@ void IAStreamImpl::set_resampler_parameter(int fsi, int fso, int chan)
 
 void IAStreamImpl::read_raw_frames(const int16_t *input, int frame_number)
 {
-    if (!user_cb)
+    if (!usr_cb)
     {
         return;
     }
@@ -541,10 +546,9 @@ void IAStreamImpl::copy_pcm_frames()
     {
         return;
     }
-    auto now = std::chrono::steady_clock::now();
-    session->load_data(PCM_CUSTOM_PERIOD_SIZE * max_chan * sizeof(int16_t));
-    user_cb((int16_t *)session->out_buf, max_chan, PCM_CUSTOM_PERIOD_SIZE, usr_data);
-    timer0.expires_at(now + asio::chrono::microseconds(PCM_CUSTOM_SAMPLE_INRV));
+    session->load_data(usr_ps * max_chan * sizeof(int16_t));
+    usr_cb((int16_t *)session->out_buf, max_chan, usr_ps, usr_data);
+    timer0.expires_after(asio::chrono::microseconds(usr_ps * 1000 / 48 - OS_CLK_OFFSET));
     timer0.async_wait([self = shared_from_this()](const asio::error_code &ec)
                       {
         if (ec)
@@ -560,13 +564,12 @@ void IAStreamImpl::exec_external_loop()
     {
         return;
     }
-    auto now = std::chrono::steady_clock::now();
     auto interval = ceil_div(ps * 1000, fs);
     if (!idevice->async_task(interval))
     {
         return;
     }
-    timer1.expires_at(now + asio::chrono::milliseconds(interval));
+    timer1.expires_after(asio::chrono::microseconds(interval - OS_CLK_OFFSET));
     timer1.async_wait([self = shared_from_this()](const asio::error_code &ec)
                       {
         if (ec)

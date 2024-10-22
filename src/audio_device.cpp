@@ -355,6 +355,7 @@ bool PipeIADevice::stop()
     if (auto np = oas.lock())
     {
         np->set_callback({});
+        return true;
     }
     return false;
 }

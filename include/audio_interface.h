@@ -79,7 +79,7 @@ public:
 
   bool connect(const std::string &ip, unsigned char token);
 
-  void set_callback(AudioInputCallBack _cb, void *_user_data);
+  void set_callback(AudioInputCallBack _cb, int _ps, void *_user_data);
 
 private:
   std::shared_ptr<IAStreamImpl> impl;
