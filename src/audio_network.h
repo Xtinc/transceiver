@@ -142,6 +142,7 @@ public:
     const size_t max_len;
     asio::streambuf buf;
     char *out_buf;
+    bool enable;
 
 private:
     std::atomic_flag ready = ATOMIC_FLAG_INIT;

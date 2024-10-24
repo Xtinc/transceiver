@@ -46,6 +46,16 @@ bool OAStream::start()
     return impl->start();
 }
 
+void OAStream::mute(unsigned char _token)
+{
+    impl->mute(_token);
+}
+
+void OAStream::unmute(unsigned char _token)
+{
+    impl->unmute(_token);
+}
+
 void OAStream::stop()
 {
     impl->stop();
@@ -127,6 +137,46 @@ bool OAStreamImpl::start()
     return true;
 }
 
+void OAStreamImpl::mute(unsigned char _token)
+{
+    std::lock_guard<std::mutex> grd(recv_mtx);
+    for (auto &s : net_sessions)
+    {
+        if (s.first == _token)
+        {
+            s.second->enable = false;
+        }
+    }
+
+    for (auto &s : loc_sessions)
+    {
+        if (s.first == _token)
+        {
+            s.second->enable = false;
+        }
+    }
+}
+
+void OAStreamImpl::unmute(unsigned char _token)
+{
+    std::lock_guard<std::mutex> grd(recv_mtx);
+    for (auto &s : net_sessions)
+    {
+        if (s.first == _token)
+        {
+            s.second->enable = true;
+        }
+    }
+
+    for (auto &s : loc_sessions)
+    {
+        if (s.first == _token)
+        {
+            s.second->enable = true;
+        }
+    }
+}
+
 void OAStreamImpl::stop()
 {
     if (!oas_ready)
@@ -144,15 +194,24 @@ void OAStreamImpl::stop()
 void OAStreamImpl::write_pcm_frames(int16_t *output, int frame_number)
 {
     std::memset(output, 0, chan_num * frame_number * sizeof(int16_t));
-    for (const auto &s : net_sessions)
     {
-        s.second->load_data(ps * s.second->chan * sizeof(int16_t));
-        mix_channels((const int16_t *)s.second->out_buf, chan_num, s.second->chan, ps, (int16_t *)output);
-    }
-    for (const auto &s : loc_sessions)
-    {
-        s.second->load_data(ps * s.second->chan * sizeof(int16_t));
-        mix_channels((const int16_t *)s.second->out_buf, chan_num, s.second->chan, ps, (int16_t *)output);
+        std::lock_guard<std::mutex> grd(recv_mtx);
+        for (const auto &s : net_sessions)
+        {
+            s.second->load_data(ps * s.second->chan * sizeof(int16_t));
+            if (s.second->enable)
+            {
+                mix_channels((const int16_t *)s.second->out_buf, chan_num, s.second->chan, ps, (int16_t *)output);
+            }
+        }
+        for (const auto &s : loc_sessions)
+        {
+            s.second->load_data(ps * s.second->chan * sizeof(int16_t));
+            if (s.second->enable)
+            {
+                mix_channels((const int16_t *)s.second->out_buf, chan_num, s.second->chan, ps, (int16_t *)output);
+            }
+        }
     }
 
     {

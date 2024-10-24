@@ -58,7 +58,7 @@ bool PacketHeader::validate(const char *data, size_t len)
 }
 
 SessionData::SessionData(size_t blk_sz, size_t blk_num, int _chan)
-    : chan(_chan), max_len(2 * blk_sz * blk_num), os(&buf), is(&buf)
+    : chan(_chan), max_len(2 * blk_sz * blk_num), enable(true), os(&buf), is(&buf)
 {
     out_buf = new char[blk_sz];
     buf.prepare(max_len);

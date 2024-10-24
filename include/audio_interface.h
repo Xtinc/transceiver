@@ -47,6 +47,10 @@ public:
 
   bool start();
 
+  void mute(unsigned char _token);
+
+  void unmute(unsigned char _token);
+
   void stop();
 
   void direct_push_pcm(uint8_t input_token, uint8_t input_chan, int input_period, int sample_rate,
