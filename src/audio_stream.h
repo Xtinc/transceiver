@@ -192,6 +192,14 @@ private:
     }
     auto audio_sender = std::make_shared<IAStreamImpl>(token + preemptive, AudioBandWidth::Full,
                                                        AudioPeriodSize::INR_20MS, name, false, false);
+    {
+      std::lock_guard<std::mutex> grd(mtx);
+      if (sounds.find(name) != sounds.cend())
+      {
+        return false;
+      }
+      sounds.insert({name, audio_sender});
+    }
     audio_sender->set_destory_callback([this, name]()
                                        {
             preemptive--;
@@ -202,10 +210,6 @@ private:
                 sounds.erase(iter);
             } });
     audio_sender->connect(args...);
-    {
-      std::lock_guard<std::mutex> grd(mtx);
-      sounds.insert({name, audio_sender});
-    }
     if (!audio_sender->start())
     {
       return false;

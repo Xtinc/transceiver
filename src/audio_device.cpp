@@ -187,7 +187,7 @@ bool PhsyIADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
         AUDIO_ERROR_PRINT("%s\n", Pa_GetErrorText(err));
         return false;
     }
-    AUDIO_INFO_PRINT("open idevice: %s, ichan = %d, max_chan = %d, fs = %d, ps = %d\n", in_default_info->name, chan,
+    AUDIO_INFO_PRINT("open idevice: %s, token = %u ,ichan = %d, max_chan = %d, fs = %d, ps = %d\n", in_default_info->name, stream->token, chan,
                      max_chan, fs, ps);
     ready = true;
     return true;
@@ -261,7 +261,7 @@ bool WaveIADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     }
     auto max_pickup_size = std::max(ps, ceil_div(ps * ifs.sample_rate(), fs));
     pick_ups = new int16_t[max_pickup_size * chan];
-    AUDIO_INFO_PRINT("file idevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", name.c_str(), chan, max_chan,
+    AUDIO_INFO_PRINT("file idevice: %s, token = %u, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", name.c_str(), iastream->token, chan, max_chan,
                      fs, ps);
     ready = true;
     return true;
@@ -426,7 +426,7 @@ bool MultiIADevice::create(const std::string &name, void *cls, int &fs, int &ps,
     }
     stream = static_cast<IAStreamImpl *>(cls);
     pick_ups = new int16_t[ps * chan];
-    AUDIO_INFO_PRINT("open idevice: %s, ichan = %d, max_chan = %d, fs = %d, ps = %d\n", in_default_info->name, chan,
+    AUDIO_INFO_PRINT("open idevice: %s, token = %u, ichan = %d, max_chan = %d, fs = %d, ps = %d\n", in_default_info->name, stream->token, chan,
                      max_chan, fs, ps);
     ready = true;
     return true;
@@ -518,7 +518,7 @@ bool PhsyOADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
         return false;
     }
     stream = static_cast<OAStreamImpl *>(cls);
-    AUDIO_INFO_PRINT("open odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", output_default_info->name, chan,
+    AUDIO_INFO_PRINT("open odevice: %s,token = %u, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", output_default_info->name, stream->token, chan,
                      max_chan, fs, ps);
     ready = true;
     return true;
@@ -578,7 +578,7 @@ bool WaveOADevice::create(const std::string &name, void *cls, int &fs, int &ps, 
     }
     ps = ceil_div(ps * fs, 1000);
     pick_ups = new int16_t[ps * chan];
-    AUDIO_INFO_PRINT("file odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", name.c_str(), chan, max_chan,
+    AUDIO_INFO_PRINT("file odevice: %s,token = %u, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", name.c_str(), oastream->token, chan, max_chan,
                      fs, ps);
     ready = true;
     return true;
@@ -680,7 +680,7 @@ bool MultiOADevice::create(const std::string &name, void *cls, int &fs, int &ps,
         return false;
     }
     stream = static_cast<OAStreamImpl *>(cls);
-    AUDIO_INFO_PRINT("open odevice: %s, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", output_default_info->name, chan,
+    AUDIO_INFO_PRINT("open odevice: %s, token = %u, ochan = %d, max_chan = %d, fs = %d, ps = %d\n", output_default_info->name, stream->token, chan,
                      max_chan, fs, ps);
     pick_ups = new int16_t[ps * chan];
     ready = true;

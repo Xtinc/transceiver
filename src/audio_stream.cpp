@@ -628,7 +628,7 @@ void IAStreamImpl::exec_external_loop()
     {
         return;
     }
-    timer1.expires_after(asio::chrono::microseconds(interval - OS_CLK_OFFSET));
+    timer1.expires_after(asio::chrono::microseconds(1000 * interval - OS_CLK_OFFSET));
     timer1.async_wait([self = shared_from_this()](const asio::error_code &ec)
                       {
         if (ec)
@@ -683,7 +683,6 @@ void AudioPlayerImpl::stop(const std::string &name)
         if (auto np = sounds.at(name).lock())
         {
             np->stop();
-            preemptive--;
         }
     }
 }
