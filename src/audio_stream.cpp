@@ -8,9 +8,9 @@ using udp = asio::ip::udp;
 #define SERVICE (AudioService::GetService().executor())
 
 #ifdef __linux__
-static constexpr auto OS_CLK_OFFSET = 40;
+static constexpr auto OS_CLK_OFFSET = 50;
 #else
-static constexpr auto OS_CLK_OFFSET = 400;
+static constexpr auto OS_CLK_OFFSET = 500;
 #endif
 static constexpr auto PHSY_DEVICE_RESRT_INTERVAL = std::chrono::minutes(30);
 static constexpr auto PCM_CUSTOM_PERIOD_SIZE = 480;
@@ -677,11 +677,12 @@ bool AudioPlayerImpl::play(const std::string &name, const std::string &ip, unsig
 
 void AudioPlayerImpl::stop(const std::string &name)
 {
-    std::lock_guard<std::mutex> grd(mtx);
+    std::unique_lock<std::mutex> lck(mtx);
     if (sounds.find(name) != sounds.cend())
     {
         if (auto np = sounds.at(name).lock())
         {
+            lck.unlock();
             np->stop();
         }
     }

@@ -192,6 +192,7 @@ private:
     }
     auto audio_sender = std::make_shared<IAStreamImpl>(token + preemptive, AudioBandWidth::Full,
                                                        AudioPeriodSize::INR_20MS, name, false, false);
+    preemptive++;
     {
       std::lock_guard<std::mutex> grd(mtx);
       if (sounds.find(name) != sounds.cend())
@@ -214,7 +215,6 @@ private:
     {
       return false;
     }
-    preemptive++;
     return true;
   }
 
