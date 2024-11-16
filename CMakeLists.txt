@@ -35,10 +35,10 @@ target_link_libraries(debug_tool PUBLIC asio)
 target_link_libraries(debug_tool PRIVATE portaudio_static Opus::opus ftxui::dom ftxui::component ftxui::screen kissfft::kissfft)
 
 # test
-# add_subdirectory(test)
-# enable_testing()
-# add_test(NAME WavFile COMMAND wav_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-# add_test(NAME ReSample COMMAND resample_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_executable(test test.cpp ${TRANS_FILES})
+target_include_directories(test PUBLIC include)
+target_link_libraries(test PUBLIC asio)
+target_link_libraries(test PRIVATE portaudio_static Opus::opus)
 
 # main
 add_executable(interphone main.cpp)
