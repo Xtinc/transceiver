@@ -1,4 +1,4 @@
-#include "audio_mixer.h"
+#include "audio_process.h"
 #include <fstream>
 
 constexpr int16_t clamp_s16(int32_t v)
@@ -34,5 +34,13 @@ void mix_channels(const int16_t *ssrc, int out_chan, int ssrc_chan, int frames_n
             res = (int32_t)output[2 * i + 1] + (int32_t)ssrc[i];
             output[2 * i + 1] = clamp_s16(res);
         }
+    }
+}
+
+void decimator_2(const int16_t *src, size_t len, int16_t *dst)
+{
+    for (size_t i = 0; i < len / 2; i++)
+    {
+        dst[i] = src[2 * i];
     }
 }
