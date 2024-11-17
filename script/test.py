@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.signal as sig
+from scipy.signal import decimate, butter
 from scipy.fft import fft, fftfreq
 
 
@@ -23,7 +24,7 @@ def sfft(data1, data2, fs1: float):
 # 1.generate signals
 fs = 24000
 t = np.linspace(0, 2, 2 * fs)
-test_signals = 32767 * sig.chirp(t, f0=0, f1=fs / 2, t1=2, method="linear")
+test_signals = np.round(32767 * sig.chirp(t, f0=0, f1=fs / 2, t1=2, method="linear"))
 
 # 2.save to file
 with open("signals.txt", mode="w", encoding="utf-8") as fp:
@@ -31,15 +32,23 @@ with open("signals.txt", mode="w", encoding="utf-8") as fp:
         fp.write(str(int(v)) + "\n")
 
 # 3.load results from file
-proc_signals = np.load("result.txt")
+proc_signals = np.loadtxt("results.txt")
+# proc_signals = decimate(test_signals, 2, n=8, ftype="iir", zero_phase=False)
+
+# sos = butter(8, 0.5, output="sos")
+# sos = sig.cheby1(8, 0.05, 0.3, output="sos")
+# np.set_printoptions(precision=15)
+# print(sos)
+# proc_signals = sig.sosfilt(sos, test_signals)[::3]
 
 # analysis
 xf1, yf1 = sfft(test_signals, proc_signals, fs)
 
+plt.figure()
 # plot
 ax1 = plt.subplot(2, 1, 1)
 ax1.plot(t, test_signals)
-ax1.plot(t[::2], proc_signals)
+ax1.plot(t[::3], proc_signals, "x")
 ax1.set_title("Linear Chirp")
 ax1.set_xlabel("t(sec)")
 
