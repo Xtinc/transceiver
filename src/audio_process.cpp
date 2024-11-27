@@ -182,3 +182,134 @@ void decimator_3(const int16_t *in, size_t len, int16_t *out, int32_t *filtState
         out[i] = clamp_s16(buffer[3 * i]);
     }
 }
+
+static constexpr auto RS_BLKSIZE = 4;
+static constexpr auto M_PI = 3.141592653589793;
+
+inline static double sinc(double x)
+{
+    return x == 0 ? 1 : std::sin(M_PI * x) / (M_PI * x);
+}
+
+static double blackman_nuttall(double x, double N)
+{
+    return 0.3635819 - 0.4891775 * std::cos((2 * M_PI * x) / N) + 0.1365995 * std::cos((4 * M_PI * x) / N) - 0.0106411 * std::cos((6 * M_PI * x) / N);
+}
+
+SincInterpolator::SincInterpolator(int order, int precision, double cutoff, double ratio)
+    : ord(order), quan(precision), step(ratio)
+{
+    prev = new double[2 * ord];
+    std::memset(prev, 0, 2 * ord * sizeof(double));
+    kern = new double[2 * ord * (quan + 1)];
+    int idx = 0;
+    for (int offset = 0; offset <= quan; offset++)
+    {
+        auto scale = 0.0;
+        int startidx = idx;
+        for (int i = -ord + 1; i <= ord; i++)
+        {
+            kern[idx] = kernel_func((double)offset / quan - i, cutoff);
+            scale += kern[idx];
+            idx++;
+        }
+        idx = startidx;
+        for (int i = -ord + 1; i <= ord; i++)
+        {
+            kern[idx++] /= scale;
+        }
+    }
+}
+
+SincInterpolator::~SincInterpolator()
+{
+    delete[] kern;
+    delete[] prev;
+}
+
+void SincInterpolator::operator()(const double *input, int n_input, double *out_put, int n_output, int stride)
+{
+    if (n_input < 2 * ord)
+    {
+        return;
+    }
+
+    int wr_pos = 0;
+    double x = step - ord;
+    for (int i = 0; i < n_output; i++)
+    {
+        out_put[wr_pos] = tlb_interpolator(x, input);
+        wr_pos += stride;
+        x += step;
+    }
+    std::memcpy(prev, &input[n_input - 2 * ord], 2 * ord * sizeof(double));
+}
+
+double SincInterpolator::tlb_interpolator(double x, const double *input)
+{
+    auto fraction = fabs(x - floor(x));
+    auto c_idx = (int)(fraction * quan + 0.5) * 2 * ord;
+    auto *coeffs = &kern[c_idx];
+
+    auto sum = 0.0;
+
+    for (int i = (int)floor(x) - ord + 1; i <= (int)floor(x) + ord; i += RS_BLKSIZE)
+    {
+        const double *samp_ptr = nullptr;
+        bool overlap = true;
+
+        // sample index, [0..order*2] are in state->p, [order*2..n] are in input
+        //                        state->p     input
+        // total input vector = [0..order*2 order*2..n]
+        auto sample_index = i + 2 * ord - 1;
+        // do we have blocksize samples in p?
+        if (sample_index + RS_BLKSIZE < 2 * ord)
+        {
+            samp_ptr = &prev[sample_index];
+            overlap = false;
+        }
+        else if (sample_index >= 2 * ord)
+        {
+            samp_ptr = &input[sample_index - 2 * ord];
+            overlap = false;
+        }
+
+        // if the samples saved from the previous iteration overlap
+        // with the ones in this one, do them separately
+        if (overlap)
+        {
+            for (int j = 0; j < RS_BLKSIZE; j++)
+            {
+                auto sample = 0.0;
+
+                if (sample_index + j >= 2 * ord)
+                {
+                    sample = input[sample_index + j - (2 * ord)];
+                }
+                else
+                {
+                    sample = prev[sample_index + j];
+                }
+                sum += sample * coeffs[j];
+            }
+        }
+        else
+        {
+            for (int i = 0; i < RS_BLKSIZE; i++)
+            {
+                sum += samp_ptr[i] * coeffs[i];
+            }
+        }
+        coeffs += RS_BLKSIZE;
+    }
+    return sum;
+}
+
+double SincInterpolator::kernel_func(double x, double cutoff) const
+{
+    if (x > -ord && x < ord)
+    {
+        return sinc(cutoff * x) * blackman_nuttall(x + 1 - ord, 2 * ord - 1);
+    }
+    return 0.0;
+}

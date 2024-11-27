@@ -6,27 +6,35 @@
 
 int main(int argc, char **argv)
 {
-    std::vector<int16_t> data_in, data_out;
-    std::ifstream ifs("signals.txt");
+    std::vector<double> data_in, data_out;
+    std::ifstream ifs("test_signals.txt");
     std::string line;
 
     while (std::getline(ifs, line))
     {
-        data_in.emplace_back(static_cast<int16_t>(std::stoi(line)));
+        data_in.emplace_back(std::stod(line));
     }
-    data_out.resize(data_in.size() / 3);
 
-    double *buffer = new double[data_in.size()];
-    int32_t st[8]{};
+    int order = 64;
+    double rt = 480.0 / 441.0;
+    double cutoff = 0.91;
+    int fs = 48000;
+    int precision = 10000;
 
-    // decimator_2(data_in.data(), data_in.size(), data_out.data());
-    decimator_3(data_in.data(), data_in.size(), data_out.data(), st, buffer);
+    int n_input = data_in.size();
+    int n_output = int(n_input / rt) + 1;
+    data_out.resize(n_output);
+
+    SincInterpolator SSR(order, precision, cutoff, rt);
+    for (size_t i = 0; i < n_input / 480; i++)
+    {
+        SSR(data_in.data() + i * 480, 480, data_out.data() + i * 441, 441, 1);
+    }
 
     std::ofstream ofs("results.txt");
     for (auto i : data_out)
     {
         ofs << i << "\n";
     }
-    delete[] buffer;
     return 0;
 }
